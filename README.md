@@ -61,9 +61,13 @@ DSH 的分块自动压缩工具：**无需主动压缩** —— 旧历史提前�
 
 ## 安装
 
+已发布到 npm：**`dsh-compaction-tower`**。
+
+> 别直接 `npm i dsh-compaction-tower` —— 那只会把包装进当前目录的 `node_modules`，DSH 启动时不看那里。插件得装进 **profile**，由宿主的插件管理来做。
+
 走宿主的插件管理，不要手改清单。装的是 tarball 或包名，宿主会自己跑 `pnpm add` 并把它加进 `~/.dsh/profiles/<name>/package.json` 的 `dsh.profile.bundles`：
 
-- **插件页**：设置 → 插件 → 安装，填包名或 tarball 路径；
+- **插件页**：设置 → 插件 → 安装，填 `dsh-compaction-tower` 或 tarball 路径；
 - **接口**：`plugin_manager install_bundle`（就是插件页背后的同一条路）。
 
 装完**重启一次应用**：宿主半侧是启动时装载的，客户端半侧随页面加载，不重启只会看到半旧状态。
@@ -72,10 +76,12 @@ DSH 的分块自动压缩工具：**无需主动压缩** —— 旧历史提前�
 
 ```json
 {
-  "dependencies": { "dsh-compaction-tower": "file:…/dsh-compaction-tower-<version>.tgz" },
+  "dependencies": { "dsh-compaction-tower": "0.1.39" },
   "dsh": { "profile": { "bundles": ["…", "dsh-compaction-tower"] } }
 }
 ```
+
+离线安装时把版本换成 tarball 路径即可：`"file:…/dsh-compaction-tower-<version>.tgz"`。
 
 插件的 `dsh.bundle.patch.yml` 只插自己一行，不覆盖任何已有配置。
 
