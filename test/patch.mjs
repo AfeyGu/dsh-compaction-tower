@@ -95,6 +95,40 @@ check('块号按已有最大号递增', idA === 'b00002' && idB === 'b00003', `$
 // 窗口 10000、触发 0.45、目标 0.15、单位 0.05 → 缺口 3000 / 500 = 6，再 +1 安全垫
 check('库存目标按公式算', tower.reserveUnitsOf(10000) === 7, String(tower.reserveUnitsOf(10000)));
 
+// ── 1d. provider 不返回 usage：退回 字符/4 估算，判定与提交照常 ──────────
+// 有的网关/本地端点不报 usage，此时 tokenMeter 的 baseline 是 estimated。
+// 插件不能因此停工，也不能把系数乱标定 —— 系数保持 1，其余按估算值走。
+const estimatedBlock = {
+  blockId: 'b00001',
+  tier: 1,
+  covers: [1],
+  summary: [{ type: 'text', text: '第一条的摘要' }],
+  coveredTokens: 2000,
+  summaryTokens: 100,
+};
+const estimatedTower = new Tower({
+  ...ctx,
+  tokenMeter: {
+    measure: () => ({ nodes, surfaceTokens: 10000, totalTokens: 10000, baseline: { kind: 'estimated', tokens: 10000 } }),
+    estimateMessage: () => 10,
+  },
+}, tower.config);
+estimatedTower.blocksOf = () => [estimatedBlock];
+check('没有 usage 时系数保持 1',
+  estimatedTower.calibration(session, { surfaceTokens: 10000, totalTokens: 10000, baseline: { kind: 'estimated' } },
+    { system: 1000, tools: 0, total: 1000 }) === 1);
+const estimatedCalls = [];
+const estimatedEngine = {
+  async compactRegion(start, end) {
+    estimatedCalls.push([start, end]);
+    return { startSeq: start, endSeq: end };
+  },
+};
+const estimatedResult = await estimatedTower.compactIfNeeded(estimatedEngine, agent, 'pressure', signal);
+check('没有 usage 时照常判越线并提交', estimatedCalls.length === 1 && estimatedResult !== null,
+  `calls=${estimatedCalls.length} result=${estimatedResult === null ? 'null' : 'ok'}`);
+check('没有 usage 时提交计数照常', estimatedTower.stats.committed === 1);
+
 // ── 2. 没有现成块：这次不压，也不交回宿主 ───────────────────────────────
 // 交回宿主会压出一段没有块号的 checkpoint，塔的账本从此对不上账。
 const noBlockTower = new Tower(ctx, tower.config);
