@@ -14,6 +14,7 @@
     "lib/**/*.js",
     "locale/*.json",
     "docs/*.png",
+    "docs/design/*.md",
     "dsh.bundle.patch.yml",
     "README.md"
   ],
