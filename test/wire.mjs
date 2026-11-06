@@ -7,7 +7,7 @@
  *
  * 跑法：node test/wire.mjs
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { apply, inject, name } from '../lib/index.js';
@@ -114,6 +114,17 @@ BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'press
 installEnginePatches(fakeTower('B'));
 BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'pressure', undefined);
 check('重装后补丁改指向新实例', JSON.stringify(rebindCalls) === JSON.stringify(['A', 'B']), rebindCalls.join(','));
+
+// ── package.json 不能带 BOM ─────────────────────────────────────────────
+// 宿主装包时要 JSON.parse 它，BOM 会让整条安装被拒（Unexpected token '\uFEFF'）。
+// pnpm pack 会重排 JSON 把 BOM 抹掉，所以本地装没事；npm publish 是原样拷贝，
+// 带 BOM 的包一发布，别人就装不上。Windows 上用 PowerShell 改这个文件最容易踩。
+const pkgBytes = readFileSync(new URL('../package.json', import.meta.url));
+check('package.json 不带 BOM',
+  !(pkgBytes[0] === 0xEF && pkgBytes[1] === 0xBB && pkgBytes[2] === 0xBF),
+  [...pkgBytes.subarray(0, 3)].map((b) => b.toString(16)).join(' '));
+check('package.json 能被严格 JSON.parse 解析',
+  (() => { try { JSON.parse(pkgBytes.toString('utf8')); return true; } catch { return false; } })());
 
 if (failures.length === 0) {
   rmSync(home, { recursive: true, force: true });
