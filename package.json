@@ -18,6 +18,18 @@
     "README.md"
   ],
   "license": "MIT",
+  "author": "AfeyGu",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "compaction",
+    "context-compression",
+    "context-window"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dsh": {
     "bundle": {
       "patch": "./dsh.bundle.patch.yml"
