@@ -81,6 +81,11 @@ check('token 有可读标签', state.blocks[0].coveredLabel === '2.0K');
 check('子块关系带出来', state.blocks[1].childBlockIds.join(',') === 'b00001');
 check('checkpoint seq 可定位', state.blocks[1].checkpointSeq === 3);
 check('表层节点带 checkpoint 归属', state.surface.find((node) => node.seq === 3)?.checkpoint === 'b00002');
+check('当前组装：按层计数 + 原文条数',
+  state.composition.tiers.length === 1 && state.composition.tiers[0].tier === 2
+  && state.composition.tiers[0].count === 1 && state.composition.raw === 2,
+  JSON.stringify(state.composition));
+check('system 不算原文', state.composition.raw === 2, String(state.composition.raw));
 
 if (failures.length === 0) {
   console.log(`✅ state: ${passed} 项全部通过`);

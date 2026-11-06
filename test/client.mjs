@@ -149,6 +149,7 @@ const fakeState = {
     status: 'committed',
     summary: '摘要正文',
   }],
+  composition: { tiers: [{ tier: 2, count: 1 }, { tier: 1, count: 3 }], raw: 42 },
   sessions: ['session-test'],
   pressure: { kind: 'no-block', blocks: 5, run: 120, total: 440900, trigger: 314600 },
   observation: { kind: 'no-material', unit: 52429, protected: 400 },
@@ -187,6 +188,8 @@ try {
   check('灰段从触发线开始', dead.length === 1 && dead[0].props.style?.left === '45%',
     dead.map((node) => node.props.style?.left).join(','));
   check('图例给出触发线数字', texts(loaded).some((text) => text === '触发线 450.0K（内容）'), JSON.stringify(texts(loaded)));
+  check('当前组装按层计数 + 原文条数',
+    texts(loaded).some((text) => text === '当前组装：T2 1 块 + T1 3 块 + 原文 42 条'), JSON.stringify(texts(loaded)));
   check('显示上次观察（为什么没蒸）', texts(loaded).some((text) => text.includes('没有可蒸材料')),
     JSON.stringify(texts(loaded).filter((text) => text.includes('上次观察'))));
   check('显示上次判定（为什么没压）', texts(loaded).some((text) => text.includes('没有可提交的块')),
