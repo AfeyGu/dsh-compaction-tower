@@ -92,8 +92,12 @@ check('并发分配不会撞块号', idA !== idB, `${idA} / ${idB}`);
 check('块号按已有最大号递增', idA === 'b00002' && idB === 'b00003', `${idA} / ${idB}`);
 
 // ── 1c. 库存目标由公式推导，不再是配置项 ────────────────────────────────
-// 窗口 10000、触发 0.45、目标 0.15、单位 0.05 → 缺口 3000 / 500 = 6，再 +1 安全垫
-check('库存目标按公式算', tower.reserveUnitsOf(10000) === 7, String(tower.reserveUnitsOf(10000)));
+// 窗口 10000、触发 0.45、目标 0.15、单位 0.05 → 缺口 3000；一块回收 500×0.8=400
+// → 3000/400 = 7.5 → 8 块，再 +1 安全垫 = 9
+const reserve = tower.reserveOf(10000);
+check('库存目标按公式算', reserve.blocks === 9, JSON.stringify(reserve));
+check('库存按回收量记账而不是原料量', reserve.reclaim === 400 && reserve.tokens === 3600,
+  `${reserve.reclaim}/${reserve.tokens}`);
 
 // ── 1d. provider 不返回 usage：退回 字符/4 估算，判定与提交照常 ──────────
 // 有的网关/本地端点不报 usage，此时 tokenMeter 的 baseline 是 estimated。
