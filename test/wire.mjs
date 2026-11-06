@@ -11,7 +11,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { apply, inject, name } from '../lib/index.js';
-import { enginePatched } from '../lib/engine.js';
+import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic';
+import { enginePatched, installEnginePatches } from '../lib/engine.js';
 import { BLOCK_RECORD_TYPE } from '../lib/core.js';
 
 // 配置覆盖层会写到 DSH_HOME 下，测试里指到临时目录，别碰真实的 ~/.dsh。
@@ -97,6 +98,22 @@ const search = tools.get('search_context');
 check('search_context 的 query 必填', search?.parameters?.required?.includes('query') === true);
 
 // sourceEventSeqs / surfaceOp 的调用形状无法在这里验证，留待真机联调。
+
+// ── 重装插件后，补丁必须改指向新实例 ────────────────────────────────────
+// 原型补丁只装一次（PATCHED 标记挡住重复安装），如果方法闭包捕获了 tower，
+// 插件重新装载后补丁会一直捏着旧实例：旧实例收到调用，界面读的却是新实例，
+// 表现就是「内容越线了但上次判定还没跑过」。这里验证引用会跟着换。
+const rebindCalls = [];
+const fakeTower = (tag) => ({
+  rememberEngine() {},
+  compactIfNeeded() { rebindCalls.push(tag); return null; },
+  serveSummary() { rebindCalls.push(`${tag}-sum`); return null; },
+});
+installEnginePatches(fakeTower('A'));
+BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'pressure', undefined);
+installEnginePatches(fakeTower('B'));
+BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'pressure', undefined);
+check('重装后补丁改指向新实例', JSON.stringify(rebindCalls) === JSON.stringify(['A', 'B']), rebindCalls.join(','));
 
 if (failures.length === 0) {
   rmSync(home, { recursive: true, force: true });
