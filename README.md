@@ -183,9 +183,21 @@ DSH 的分块自动压缩工具：**无需主动压缩** —— 旧历史提前�
 > 为什么不用宿主的 settings 服务：`settings.describe()` 只列出 **profile 文档里**的条目，
 > 由 bundle patch 插入的行不在其中——我们这条 `compaction-tower` 正是被插进去的，拿不到表单。
 
+## 接管了宿主的哪些入口
+
+| 入口 | 原来的行为 | 装了以后 |
+|---|---|---|
+| 到阈值自动压（`compactIfNeeded`） | 宿主自己挑一段、现调模型摘要 | 换成塔的判定与提交 |
+| `/compact` 命令（`compactNow`） | 绕过前者，直接 `compactSurfaceRegion` 压一段 | **提交塔里已经蒸好的块**；没块时可压内容为零，什么都不做 |
+| `summarize` | 宿主现场摘要 | 有现成块就直接返回，零 LLM 调用 |
+
+`/compact` 这一条必须接管：它原来走的是另一条路径，压出来的 checkpoint 没有块号，账本解释不了它，被它盖住的块会悄悄失效。
+
+**装之前已经被宿主压过的会话**：插件会把那些无主 checkpoint 认领成「只读块」——可见、不进库存、永远不会被再次提交，但 `decompress` 仍然能把它们背后被盖掉的原文取回来（`covers` 取自宿主写下的 `sourceEventSeqs`）。
+
 ## 已知限制
 
-- **原型补丁依赖方法名**：`compactIfNeeded` / `summarize` 是官方扩展点，但宿主大版本升级后需要复查。缺失时插件会记 warning 并降级为「只提供工具」。
+- **原型补丁依赖方法名**：`compactIfNeeded` / `summarize` / `compactNow` 是官方扩展点，但宿主大版本升级后需要复查。缺失时插件会记 warning 并降级为「只提供工具」。
 - **块记录每次现读**：`blocksOf()` 遍历会话全量事件。请求前的排程有 5 秒节流、回合尾才无条件跑一次，所以长会话下是「偶尔 O(事件数)」，不是每个 step。
 - **默认比例未经长会话标定**：`triggerRatio 0.45` 按 1M 窗口推；`distillMinRunRatio 0.05` 是单块分量（≈52K @ 1M），实际频率与块大小待多轮观察。
 

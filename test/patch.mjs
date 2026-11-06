@@ -8,6 +8,8 @@
  * 跑法：node test/patch.mjs
  */
 import { Tower } from '../lib/tower.js';
+import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic';
+import { installEnginePatches } from '../lib/engine.js';
 
 const failures = [];
 let passed = 0;
@@ -273,6 +275,18 @@ const followEngine = {
 };
 await tower.summarizeWithRoute(followEngine, { messages: [] }, swapAgent, signal);
 check('观察者留空：不碰引擎配置', followSeen[0] === '');
+
+// ── /compact 接管：命令走塔的提交，不再让宿主现场摘要 ────────────────────
+const manualCalls = [];
+const commandTower = new Tower({ ...ctx }, tower.config);
+commandTower.manualCompact = async () => {
+  manualCalls.push('manual');
+  return { shadowedSeqs: [1, 2], shadowedTokenCount: 30 };
+};
+installEnginePatches(commandTower);
+const commandResult = await BasicCompactionEngine.prototype.compactNow.call({}, { session: { id: 'c' } }, undefined, 'cmd-1');
+check('/compact 交给塔的手动提交', manualCalls.length === 1);
+check('/compact 拿到塔的结果', commandResult?.shadowedSeqs?.length === 2);
 
 if (failures.length === 0) {
   console.log(`✅ patch: ${passed} 项全部通过`);

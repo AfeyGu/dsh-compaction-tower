@@ -432,6 +432,37 @@ shrunkEvents.set(4, { seq: 4, type: 'assistant/message', data: { usage: { inputT
 equal('差分为负（区间跨过压缩）就放弃', tower.realTokensOf({ id: 'tx2', eventAt: (seq) => shrunkEvents.get(seq) }, [2, 3], 20000), null);
 equal('缺 usage 边界就放弃', tower.realTokensOf({ id: 'tx3', eventAt: () => undefined }, [2, 3], 20000), null);
 
+// ── 认领宿主遗留的 checkpoint ────────────────────────────────────────────
+// 装插件之前宿主压过一轮：表层上有一个没有块号的 checkpoint。塔要把它登记成
+// 一个「只读块」——可见、可回读、不参与提交，这样账本上不留洞。
+const importSession = Session.create('tower-import');
+const mkMsg = (text) => ({
+  id: `h_${Math.random().toString(16).slice(2, 10)}`,
+  role: 'user',
+  content: [{ type: 'text', text }],
+  source: { kind: 'user' },
+});
+const i0 = importSession.append('user/message', mkMsg('原文一'), { surfaceOp: 'append' });
+const i1 = importSession.append('user/message', mkMsg('原文二'), { surfaceOp: 'append' });
+const i2 = importSession.append('user/message', mkMsg('原文三'), { surfaceOp: 'append' });
+const foreign = importSession.append('user/message', {
+  id: 'cp1',
+  role: 'user',
+  content: [{ type: 'text', text: '<compacted-summary>宿主压出来的摘要</compacted-summary>' }],
+  source: { kind: 'compact-checkpoint', compactionId: 'c9' },
+}, { surfaceOp: { op: 'replace', startSeq: i0.seq, endSeq: i1.seq }, sourceEventSeqs: [i0.seq, i1.seq] });
+
+const importTower = new Tower({}, resolveConfig({}));
+importTower.flushSession = async () => {};
+await importTower.ensureImported({ session: importSession });
+const imported = readBlocks(importSession);
+equal('无主 checkpoint 被认领成一个块', imported.length, 1);
+equal('覆盖区间从 surfaceOp 还原', imported[0]?.covers.join(','), `${i0.seq},${i1.seq}`);
+equal('认领的块有身份记录', checkpointOwner(importSession).get(foreign.seq), imported[0]?.blockId);
+equal('认领的块盖不到已离开表层的原文，因此永不提交', usable(imported[0], { surfaceSeqs: new Set(importSession.surface.nodes) }), false);
+await importTower.ensureImported({ session: importSession });
+equal('重复认领是幂等的', readBlocks(importSession).length, 1);
+
 // ── 结果 ────────────────────────────────────────────────────────────────
 if (failures.length === 0) {
   console.log(`✅ smoke: ${passed} 项全部通过`);
