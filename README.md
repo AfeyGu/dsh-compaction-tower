@@ -4,7 +4,7 @@ DSH 的分块自动压缩工具：**无需主动压缩** —— 旧历史提前�
 
 **一句话**：旧历史在后台被蒸成块（只进日志，模型看不见）；占用越过触发线时，整块换进上下文、落回目标线，所以上下文一直在区间里来回。
 
-![压缩逻辑](docs/compression.png)
+![压缩逻辑](https://cdn.jsdelivr.net/gh/AfeyGu/dsh-compaction-tower@main/docs/compression.png)
 
 ## 它做什么
 
@@ -129,7 +129,7 @@ DSH 的分块自动压缩工具：**无需主动压缩** —— 旧历史提前�
 
 ## 界面
 
-![Tower 面板](docs/panel.png)
+![Tower 面板](https://cdn.jsdelivr.net/gh/AfeyGu/dsh-compaction-tower@main/docs/panel.png)
 
 装进 `web` 组合后，会话区多一个 **压缩** 视图 tab（`conversation.view` 槽位），只读展示 + 三个手动操作：
 
@@ -143,7 +143,7 @@ DSH 的分块自动压缩工具：**无需主动压缩** —— 旧历史提前�
 
 块列表和塔结构各自有高度上限、各自内部滚动（`.tw-table-wrap` / `.tw-tree-wrap`），块多到几十个也不会把页面顶长；面板本身不产生横向滚动。窄到 800px（侧栏收成图标）时表格与表单仍然不挤压、不折行溢出：
 
-![窄屏](docs/panel-narrow.png)
+![窄屏](https://cdn.jsdelivr.net/gh/AfeyGu/dsh-compaction-tower@main/docs/panel-narrow.png)
 
 数据走宿主同源的四个路由（`lib/server.js`）：
 
@@ -162,7 +162,7 @@ DSH 的分块自动压缩工具：**无需主动压缩** —— 旧历史提前�
 
 ### 配置界面
 
-![配置表单](docs/config.png)
+![配置表单](https://cdn.jsdelivr.net/gh/AfeyGu/dsh-compaction-tower@main/docs/config.png)
 
 插件页里点开本插件卡片，表单直接渲染在描述下方（`plugins.bundle.config` 槽位），**17 项**按「触发与目标(2) / 观察者(11) / 塔(2) / 解压(2)」分组，每项带说明、百分比换算与「恢复默认」。观察者的 provider / model 是下拉框，候选直接取自宿主的模型目录（`llm.listProviders` + `llm.listModels`），和对话框里的模型选择是同一份数据；留空即跟随当前会话。提示词字段是三档下拉 + 只读展示。
 

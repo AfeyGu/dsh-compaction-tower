@@ -1,9 +1,17 @@
-﻿{
+{
   "name": "dsh-compaction-tower",
-  "version": "0.1.38",
+  "version": "0.1.39",
   "description": "Layered background distillation for DeepSeek Harness: distill early history ahead of time, commit whole blocks with zero LLM calls, and expose decompress/search_context to the model",
   "type": "module",
   "main": "lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AfeyGu/dsh-compaction-tower.git"
+  },
+  "homepage": "https://github.com/AfeyGu/dsh-compaction-tower#readme",
+  "bugs": {
+    "url": "https://github.com/AfeyGu/dsh-compaction-tower/issues"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
@@ -41,18 +49,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.1 <5",
-    "@deepseek-ai/dsh-commands": ">=0.2.1-0 <0.2.1 || >=0.2.1 <0.3.0 || >=0.2.2-0 <0.2.2 || >=0.2.3-0 <0.2.3",
     "@deepseek-ai/dsh-compaction": ">=0.2.1-0 <0.2.1 || >=0.2.1 <0.3.0 || >=0.2.2-0 <0.2.2 || >=0.2.3-0 <0.2.3",
     "@deepseek-ai/dsh-compaction-basic": ">=0.2.1-0 <0.2.1 || >=0.2.1 <0.3.0 || >=0.2.2-0 <0.2.2 || >=0.2.3-0 <0.2.3",
     "@deepseek-ai/dsh-llm": ">=0.2.1-0 <0.2.1 || >=0.2.1 <0.3.0 || >=0.2.2-0 <0.2.2 || >=0.2.3-0 <0.2.3",
     "@deepseek-ai/dsh-session": ">=0.2.1-0 <0.2.1 || >=0.2.1 <0.3.0 || >=0.2.2-0 <0.2.2 || >=0.2.3-0 <0.2.3",
     "@deepseek-ai/dsh-token-meter": ">=0.2.1-0 <0.2.1 || >=0.2.1 <0.3.0 || >=0.2.2-0 <0.2.2 || >=0.2.3-0 <0.2.3",
     "@deepseek-ai/dsh-tools": ">=0.2.1-0 <0.2.1 || >=0.2.1 <0.3.0 || >=0.2.2-0 <0.2.2 || >=0.2.3-0 <0.2.3"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-commands": {
-      "optional": true
-    }
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "~3.18.5"
