@@ -400,22 +400,20 @@ equal('只保护最近 1 步', [...protectedTail([0, 1, 2, 3], [0, 2], 1)].sort(
 equal('retain 0 时不保护', protectedTail([0, 1, 2, 3], [0, 2], 0).size, 0);
 equal('没有 step 记录时不保护', protectedTail([0, 1], [], 3).size, 0);
 
-// ── 标定：用真实 usage 反推「固定开销」与「估算→真实系数」 ──────────────
-// 判定拿的是 provider 的真实 prompt，挑料拿的是 chars/4 估算。模型：
-// 真实 = 固定 + 系数 × 估算。固定是 system + 工具 schema，永远测不到单项，
-// 但可以用「起步那次请求」定截距、用「现在这次」定斜率。
+// ── 事实修正系数：真实 token ÷ chars/4 估算 ────────────────────────────
+// 宿主没有分词器，只有 provider 报的真实用量（整条请求一个数）。用它除以同一时刻的
+// 估算量就得到系数，乘回所有估算值 —— 阈值、单位、块大小、面板全走这一把尺子。
+// 保留两位：长会话里它会收敛，面板上的数字才不会每轮抖一下。
 const fitTower = new Tower({}, resolveConfig({}));
 const fitSession = { id: 'fit' };
 const sample = (surfaceTokens, totalTokens, kind = 'usage') => ({ surfaceTokens, totalTokens, baseline: { kind } });
-const heuristicOverhead = { system: 1000, tools: 0, total: 1000 };
-// 起步：消息只有 500，整条 26000 基本就是固定开销
-equal('起步时整条 prompt 就是固定开销', fitTower.calibration(fitSession, sample(1500, 26000), heuristicOverhead).fixed, 25500);
-equal('样本不够时系数保持 1', fitTower.calibration(fitSession, sample(1500, 26000), heuristicOverhead).ratio, 1);
-// 长起来之后：斜率 = (510000 − 26000) / (400000 − 500) ≈ 1.21
-equal('消息量拉开后解出系数', Math.round(fitTower.calibration(fitSession, sample(401000, 510000), heuristicOverhead).ratio * 100) / 100, 1.21);
-equal('固定开销按系数回算', fitTower.calibration(fitSession, sample(401000, 510000), heuristicOverhead).fixed, 25394);
-// 拿不到真实用量（刚开局 / 请求失败）时沿用已有标定，不退回估算
-equal('无真实用量时沿用标定结果', fitTower.calibration(fitSession, sample(401000, 0, 'estimated'), heuristicOverhead).fixed, 25394);
+const fitOverhead = { system: 1000, tools: 1000, total: 2000 };
+equal('没有真实用量时系数是 1', fitTower.calibration(fitSession, sample(401000, 0, 'estimated'), fitOverhead), 1);
+// 510000 / (401000 + 1000) = 1.2686 → 1.27
+equal('系数 = 真实 ÷ 估算（两位小数）', fitTower.calibration(fitSession, sample(401000, 510000), fitOverhead), 1.27);
+// 平滑：1.27 × 0.7 + (520000 / 403000 = 1.2903) × 0.3 = 1.2761 → 1.28
+equal('后续样本做平滑再取两位', fitTower.calibration(fitSession, sample(402000, 520000), fitOverhead), 1.28);
+equal('没有真实用量时沿用已收敛的系数', fitTower.calibration(fitSession, sample(402000, 0, 'estimated'), fitOverhead), 1.28);
 
 // ── 真值归因：两次请求的 prompt 差，就是这段材料真实占的 token ────────────
 const txEvents = new Map([

@@ -38,7 +38,14 @@ const session = {
 
 const ctx = {
   logger: { info() {}, warn() {}, error() {} },
-  tokenMeter: { measure: () => ({ nodes: [{ seq: 0, tokens: 5000, heuristicTokens: 5000 }], totalTokens: 12000 }), estimateMessage: () => 10 },
+  tokenMeter: {
+    measure: () => ({
+      nodes: [{ seq: 0, tokens: 5000, heuristicTokens: 5000 }, { seq: 1, tokens: 7000, heuristicTokens: 7000 }],
+      surfaceTokens: 12000,
+      totalTokens: 12000,
+    }),
+    estimateMessage: () => 10,
+  },
   llm: { resolveModelInfo: async () => ({ context: { contextWindow: 100000 } }) },
 };
 

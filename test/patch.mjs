@@ -36,7 +36,7 @@ const nodes = [
 
 const ctx = {
   logger: { info() {}, warn() {}, error() {} },
-  tokenMeter: { measure: () => ({ nodes, totalTokens: 10000 }), estimateMessage: () => 10 },
+  tokenMeter: { measure: () => ({ nodes, surfaceTokens: 10000, totalTokens: 10000 }), estimateMessage: () => 10 },
   llm: { resolveModelInfo: async () => ({ context: { contextWindow: 10000 } }) },
 };
 
@@ -109,7 +109,7 @@ check('无块时不压', calls.length === beforeNoBlock);
 check('无块时返回 null', noBlockResult === null);
 
 // ── 3. 未到阈值：什么都不做 ─────────────────────────────────────────────
-const relaxed = new Tower({ ...ctx, tokenMeter: { measure: () => ({ nodes, totalTokens: 1000 }), estimateMessage: () => 10 } }, tower.config);
+const relaxed = new Tower({ ...ctx, tokenMeter: { measure: () => ({ nodes, surfaceTokens: 1000, totalTokens: 1000 }), estimateMessage: () => 10 } }, tower.config);
 relaxed.blocksOf = () => [block];
 const idle = await relaxed.compactIfNeeded(engine, agent, 'pressure', signal);
 check('未到阈值返回 null', idle === null);
@@ -117,7 +117,7 @@ check('未到阈值返回 null', idle === null);
 // ── 3b. 分母扣掉固定开销：system 不进触发线 ──────────────────────────────
 // 窗口 10000、system 1000 → 可用 9000，触发 0.45×9000 = 4050。
 // 整条请求 5000 看着越线，但内容只有 4000，还差一点 —— 不该压。
-const meter = (totalTokens) => ({ measure: () => ({ nodes, totalTokens }), estimateMessage: () => 10 });
+const meter = (totalTokens) => ({ measure: () => ({ nodes, surfaceTokens: totalTokens, totalTokens }), estimateMessage: () => 10 });
 const belowOverhead = new Tower({ ...ctx, tokenMeter: meter(5000) }, tower.config);
 belowOverhead.blocksOf = () => [block];
 const overheadIdle = await belowOverhead.compactIfNeeded(engine, agent, 'pressure', signal);
