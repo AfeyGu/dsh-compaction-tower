@@ -92,10 +92,6 @@ const modeField = allFields.find((field) => field.key === 'summaryPromptMode');
 equal('提示词档位默认 host', modeField?.value, 'host');
 check('档位下拉带三个候选项', Array.isArray(modeField?.options) && modeField.options.length === 3);
 equal('自定义提示词是多行文本', allFields.find((field) => field.key === 'summaryPrompt')?.type, 'textarea');
-equal('顾问请求也是多行文本', allFields.find((field) => field.key === 'advisorPrompt')?.type, 'textarea');
-equal('顾问提示词默认留空', allFields.find((field) => field.key === 'advisorPrompt')?.value, '');
-equal('顾问人设档位默认 builtin', allFields.find((field) => field.key === 'advisorSystemMode')?.value, 'builtin');
-check('顾问人设档位两个候选', allFields.find((field) => field.key === 'advisorSystemMode')?.options?.length === 2);
 equal('蒸馏提示词记着它的档位键', allFields.find((field) => field.key === 'summaryPrompt')?.modeKey, 'summaryPromptMode');
 equal('蒸馏提示词知道预设映射', allFields.find((field) => field.key === 'summaryPrompt')?.presetFor, { host: 'summaryHost', zh: 'summaryZh' });
 check('摘要输出上限默认是很大的保险丝', DEFAULTS.summaryMaxTokens >= 200000, String(DEFAULTS.summaryMaxTokens));
@@ -104,13 +100,13 @@ store.save({ summaryMaxTokens: 0 });
 equal('上限可以存成 0', store.config.summaryMaxTokens, 0);
 store.reset(['summaryMaxTokens']);
 
-store.save({ summaryPromptMode: 'zh', advisorPrompt: '只回答一句话' });
+store.save({ summaryPromptMode: 'zh', summaryMaxTokens: 8000 });
 equal('提示词档位可保存', store.config.summaryPromptMode, 'zh');
-equal('顾问提示词可保存', store.config.advisorPrompt, '只回答一句话');
+equal('摘要上限可保存', store.config.summaryMaxTokens, 8000);
 threw = false;
 try { store.save({ summaryPromptMode: 'nope' }); } catch { threw = true; }
 check('未知档位被拒', threw);
-store.reset(['summaryPromptMode', 'advisorPrompt']);
+store.reset(['summaryPromptMode', 'summaryMaxTokens']);
 
 // ── 路由：GET / POST /tower/config ──────────────────────────────────────
 const routes = new Map();
@@ -178,7 +174,7 @@ const emptyRes = fakeResponse();
 await handler(fakeRequest('POST', {}), emptyRes);
 equal('空 body 返回 400', emptyRes.status, 400);
 
-// ── 模型目录：随配置一起下发，给观察者/顾问的下拉框用 ────────────────────
+// ── 模型目录：随配置一起下发，给观察者的下拉框用 ────────────────────────
 const catalogRoutes = new Map();
 registerTowerRoutes({
   webServer: { register(route) { catalogRoutes.set(route.path, route); return () => {}; } },

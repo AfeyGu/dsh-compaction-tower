@@ -149,7 +149,6 @@ const fakeState = {
     status: 'committed',
     summary: '摘要正文',
   }],
-  advice: [],
   sessions: ['session-test'],
   pressure: { kind: 'no-block', blocks: 5, run: 120, total: 440900, trigger: 314600 },
   observation: { kind: 'no-material', unit: 52429, protected: 400 },

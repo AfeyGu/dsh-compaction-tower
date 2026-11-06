@@ -52,8 +52,7 @@ const ctx = {
 const config = {
   triggerRatio: 0.45, targetRatio: 0.15, distillMinRunRatio: 0.05, retainRecentGroups: 10,
   observerMaxTokens: 16000, observerTimeoutMs: 120000, inlineMaxRatio: 0.02, hardMaxTokens: 40000,
-  exportKeepSessions: 20, mergeMinBlocks: 2, advisorExpose: false, advisorProvider: '',
-  advisorModel: '', advisorMaxTokens: 8000,
+  exportKeepSessions: 20, mergeMinBlocks: 2,
 };
 
 const tower = new Tower(ctx, config);
@@ -82,7 +81,6 @@ check('token 有可读标签', state.blocks[0].coveredLabel === '2.0K');
 check('子块关系带出来', state.blocks[1].childBlockIds.join(',') === 'b00001');
 check('checkpoint seq 可定位', state.blocks[1].checkpointSeq === 3);
 check('表层节点带 checkpoint 归属', state.surface.find((node) => node.seq === 3)?.checkpoint === 'b00002');
-check('顾问记录为空时给空数组', Array.isArray(state.advice) && state.advice.length === 0);
 
 if (failures.length === 0) {
   console.log(`✅ state: ${passed} 项全部通过`);

@@ -1,13 +1,12 @@
 /**
  * 布局探针：在不同窗口宽度下量「Tower 面板」与「配置表单」有没有溢出、有没有被挤压，
- * 每种宽度留一张截图。顺带能验证 /advisor 斜杠命令（TOWER_SLASH=1）。
+ * 每种宽度留一张截图。
  *
  * 用法：node tools/probe-layout.mjs <url> [debugPort]
  *
  * 环境变量：
  *   TOWER_WIDTHS=1440,1024,800   要测的宽度（默认这三个）
  *   TOWER_LAYOUT_TARGET=panel|config|both（默认 both）
- *   TOWER_SLASH=1                额外测一次 /advisor（会真的发一条斜杠命令）
  *   TOWER_LAYOUT_TURNS=16        先发几轮（默认 0；空浏览器里没有会话就看不到 tab，且块要几轮才攒得出来）
  *   TOWER_LAYOUT_WAIT_MS=6000    页面加载后先等多久
  */
@@ -26,7 +25,6 @@ if (url === undefined) {
 const widths = (process.env.TOWER_WIDTHS ?? '1440,1024,800')
   .split(',').map((value) => Number(value.trim())).filter((value) => Number.isFinite(value));
 const target = process.env.TOWER_LAYOUT_TARGET ?? 'both';
-const slash = process.env.TOWER_SLASH === '1';
 const firstTurn = Number(process.env.TOWER_LAYOUT_TURNS ?? 0);
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
@@ -272,29 +270,6 @@ if (target === 'panel' || target === 'both') {
     }
   }
 
-  if (slash) {
-    console.log('\n=== /advisor 斜杠命令 ===');
-    const before = await evaluate(`(document.querySelector('.tw-root')?.innerText.match(/顾问意见（(\\d+)）/) ?? [])[1] ?? null`);
-    console.log('执行前顾问条数:', before);
-    await setWidth(1440);
-    const sent = await sendTurn('/advisor');
-    console.log('发出 /advisor:', sent);
-    await sleep(3000);
-    const body = await evaluate(`document.body.innerText.slice(-1200)`);
-    console.log('页面尾部文字:\n' + body);
-    const after = await evaluate(`(document.querySelector('.tw-root')?.innerText.match(/顾问意见（(\\d+)）/) ?? [])[1] ?? null`);
-    console.log('执行后顾问条数:', after);
-    await clickText('Tower');
-    await sleep(1500);
-    console.log('面板顾问段:\n' + JSON.stringify(await evaluate(`(() => {
-      const root = document.querySelector('.tw-root');
-      if (root === null) return null;
-      const text = root.innerText || '';
-      const index = text.indexOf('顾问意见');
-      return index < 0 ? text.slice(-400) : text.slice(index, index + 600);
-    })()`)));
-    console.log('截图:', await shot('tower-advisor'));
-  }
 }
 
 // ── 配置表单：多种宽度 ────────────────────────────────────────────────

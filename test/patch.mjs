@@ -51,10 +51,6 @@ const tower = new Tower(ctx, {
   hardMaxTokens: 40000,
   exportKeepSessions: 20,
   mergeMinBlocks: 2,
-  advisorExpose: false,
-  advisorProvider: '',
-  advisorModel: '',
-  advisorMaxTokens: 8000,
 });
 
 const block = {
@@ -208,39 +204,6 @@ const mergeEnd = tower.balancedPrefixEnd(pairSession, [4], pairSurface);
 check('checkpoint 落在 step 之外也能提交', mergeEnd === 4, String(mergeEnd));
 const shrinkEnd = tower.balancedPrefixEnd(pairSession, [4, 5], pairSurface);
 check('末位卡在工具调用中间就往前缩', shrinkEnd === 4, String(shrinkEnd));
-
-// ── 8. advisor：旁路请求、提示词替换、不写表层 ─────────────────────────
-const adviceSession = {
-  id: 'tower-advisor',
-  deriveMessages: () => [
-    { role: 'system', content: [{ type: 'text', text: '执行者的 system' }] },
-    { role: 'user', content: [{ type: 'text', text: '做点事' }] },
-  ],
-};
-const requests = [];
-const advisorTower = new Tower({
-  ...ctx,
-  llm: {
-    resolveModelInfo: async () => ({ context: { contextWindow: 10000 } }),
-    stream: (options) => {
-      requests.push(options);
-      return (async function* stream() {
-        yield { type: 'block-start', index: 0, blockType: 'text' };
-        yield { type: 'text-delta', index: 0, text: '计划：先跑测试' };
-        yield { type: 'block-end', index: 0, block: { type: 'text', text: '计划：先跑测试' } };
-        yield { type: 'finish', reason: { kind: 'stop' } };
-      }());
-    },
-  },
-}, tower.config);
-advisorTower.isLive = () => false;
-const advice = await advisorTower.advise({ session: adviceSession, options: { provider: 'p', model: 'm' } }, signal);
-check('advisor 返回评审文本', advice.text.includes('计划'));
-check('advisor 换了 system 人设', requests[0].messages[0].content[0].text.includes('评审顾问'));
-check('advisor 在尾部追加了请求', requests[0].messages.at(-1).content[0].text.includes('三选一'));
-check('advisor 保留了执行者消息', requests[0].messages.some((message) => message.content?.[0]?.text === '做点事'));
-check('advisor 用独立 purpose', requests[0].purpose === 'advisor');
-check('advisor 默认跟随会话路由', requests[0].provider === 'p' && requests[0].model === 'm');
 
 // ── 9. 观察者模型：配了就临时换引擎的摘要路由，换完立刻还原 ───────────────
 const swapTower = new Tower({ ...ctx }, {

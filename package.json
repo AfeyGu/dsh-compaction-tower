@@ -1,6 +1,6 @@
 ﻿{
   "name": "dsh-compaction-tower",
-  "version": "0.1.33",
+  "version": "0.1.34",
   "description": "Layered background distillation for DeepSeek Harness: distill early history ahead of time, commit whole blocks with zero LLM calls, and expose decompress/search_context to the model",
   "type": "module",
   "main": "lib/index.js",

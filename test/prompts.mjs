@@ -1,5 +1,5 @@
 /**
- * 提示词的测试：三档观察者指令、顾问的留空回退、以及「自己发那次摘要请求」的形状。
+ * 提示词的测试：三档观察者指令、以及「自己发那次摘要请求」的形状。
  *
  * 这里守的是三条容易退化的约定：
  *   1. 留空 / host 必须真的走宿主，不能悄悄接管；
@@ -9,7 +9,7 @@
  * 跑法：node test/prompts.mjs
  */
 import { Tower } from '../lib/tower.js';
-import { advisorPersona, advisorRequest, summaryInstruction, SUMMARY_PROMPT_ZH, ADVISOR_SYSTEM, ADVISOR_PROMPT } from '../lib/prompts.js';
+import { summaryInstruction, SUMMARY_PROMPT_ZH } from '../lib/prompts.js';
 import { requestSummary } from '../lib/summarize.js';
 import { resolveConfig } from '../lib/config.js';
 
@@ -33,16 +33,7 @@ check('自定义档用自己的文本', summaryInstruction({ ...base, summaryPro
 check('自定义档留空则退回宿主', summaryInstruction({ ...base, summaryPromptMode: 'custom', summaryPrompt: '   ' }) === null);
 check('未知档位按 host 处理', summaryInstruction({ ...base, summaryPromptMode: 'nope' }) === null);
 
-// ── 2. 顾问：留空 = 内置 ────────────────────────────────────────────────
-check('顾问人设留空用内置', advisorPersona(base) === ADVISOR_SYSTEM);
-check('顾问请求留空用内置', advisorRequest(base) === ADVISOR_PROMPT);
-check('内置档即使写了文本也用内置', advisorPersona({ ...base, advisorSystem: '写了但没切档' }) === ADVISOR_SYSTEM);
-check('自定义档用人设覆盖', advisorPersona({ ...base, advisorSystemMode: 'custom', advisorSystem: '你是挑剔的架构师' }) === '你是挑剔的架构师');
-check('自定义档用请求覆盖', advisorRequest({ ...base, advisorPromptMode: 'custom', advisorPrompt: '只回答一句话' }) === '只回答一句话');
-check('自定义档留空退回内置人设', advisorPersona({ ...base, advisorSystemMode: 'custom', advisorSystem: '   ' }) === ADVISOR_SYSTEM);
-check('自定义档留空退回内置请求', advisorRequest({ ...base, advisorPromptMode: 'custom', advisorPrompt: '' }) === ADVISOR_PROMPT);
-
-// ── 3. requestSummary 的请求形状 ────────────────────────────────────────
+// ── 2. requestSummary 的请求形状 ────────────────────────────────────────
 const seen = [];
 function fakeCtx(finish = { kind: 'stop' }, text = '中文摘要正文') {
   return {

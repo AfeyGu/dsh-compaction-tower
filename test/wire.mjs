@@ -80,15 +80,8 @@ check('注入四项服务', JSON.stringify(inject) === JSON.stringify(['tools', 
 check('引擎补丁已装上', enginePatched() === true);
 check('注册了 decompress', tools.has('decompress'));
 check('注册了 search_context', tools.has('search_context'));
-check('默认不暴露 advisor 工具', tools.has('advisor') === false);
 check('监听了 turn-stopping', listeners.some((entry) => entry.event === 'agent/turn-stopping'));
 check('块记录类型合法', /^plugin:[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u.test(BLOCK_RECORD_TYPE));
-check('装载了 /advisor 子插件', subplugins.some((plugin) => plugin.name === 'compaction-tower-command'));
-
-const oracle = subplugins.find((plugin) => plugin.name === 'compaction-tower-command');
-await oracle?.apply(ctx);
-check('注册了 /advisor 命令', commands.has('advisor'));
-check('/advisor 有定义 id', typeof commands.get('advisor')?.definitionId === 'string');
 
 const routesPlugin = subplugins.find((plugin) => plugin.name === 'compaction-tower-routes');
 check('装载了 Web 路由子插件', routesPlugin !== undefined);
@@ -104,22 +97,6 @@ const search = tools.get('search_context');
 check('search_context 的 query 必填', search?.parameters?.required?.includes('query') === true);
 
 // sourceEventSeqs / surfaceOp 的调用形状无法在这里验证，留待真机联调。
-
-// ── advisorExpose = true 时才把 advisor 暴露给模型 ──────────────────────
-const exposed = new Map();
-const exposedCtx = {
-  ...ctx,
-  tools: {
-    register(tool) {
-      exposed.set(tool.name, tool);
-      return () => exposed.delete(tool.name);
-    },
-  },
-  plugin() { return undefined; },
-};
-apply(exposedCtx, { advisorExpose: true });
-check('advisorExpose 打开后注册 advisor', exposed.has('advisor'));
-check('advisor 零参数', JSON.stringify(exposed.get('advisor')?.parameters?.properties ?? {}) === '{}');
 
 if (failures.length === 0) {
   rmSync(home, { recursive: true, force: true });

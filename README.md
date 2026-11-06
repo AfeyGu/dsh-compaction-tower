@@ -7,7 +7,6 @@
 - **压缩由它自己决定，不用模型操心**：观察者在后台把早期历史蒸成「块」写进日志 —— 只进日志不进上下文，模型看不见。每次请求前和每个回合结束前各判定一次，按「每层库存」决定蒸几块，并发发起（默认 10 个）。**每层库存 =（触发线 − 目标线）÷ 一个单位，再留 1 块当安全垫**，默认 45% / 15% / 5% 时是 **7 块**。
 - **越线那一刻不等模型**：块是提前蒸好的，提交就是一次查表，再交给宿主的压缩引擎换进表层 —— 不卡顿。
 - **压过的内容还能取回来**：`decompress` 看回被压缩的历史，`search_context` 在含已压缩内容的全部历史里搜。
-- **可选的评审顾问**：`/advisor` 命令（用户手动），或把 `advisor` 工具暴露给模型；提问走独立旁路请求，不占执行者上下文。
 
 ## 它不做什么
 
@@ -104,14 +103,6 @@
 | `hardMaxTokens` | 40000 | 单次解压的绝对上限 |
 | `exportKeepSessions` | 20 | 保留最近 N 个导出会话目录 |
 | `mergeMinBlocks` | 2 | 一次合并的块数下限；真正的门槛是同层 checkpoint 要累加到窗口的 5% |
-| `advisorExpose` | false | 是否把 `advisor` 工具暴露给模型（关闭时只能 `/advisor`） |
-| `advisorProvider` | `''` | 顾问用的 provider，空 = 跟随会话 |
-| `advisorModel` | `''` | 顾问用的 model，空 = 跟随会话 |
-| `advisorMaxTokens` | 200000 | 顾问单次回答的 token 上限；同样是防失控的保险丝，不是限制 |
-| `advisorSystem` | `''` | 自定义顾问人设，仅 `advisorSystemMode = custom` 时生效 |
-| `advisorSystemMode` | `builtin` | 顾问人设档位：`builtin`（内置）/ `custom`（自定义） |
-| `advisorPrompt` | `''` | 自定义顾问请求，仅 `advisorPromptMode = custom` 时生效 |
-| `advisorPromptMode` | `builtin` | 顾问请求档位：`builtin`（内置）/ `custom`（自定义） |
 
 ## 压缩怎么工作
 
@@ -144,7 +135,6 @@
 - 上次观察：没有可蒸材料（都在保护区内）/ 库存已够 / 并发名额占满 / 发起了几块。
 - **块列表**：块号、层、覆盖条数、原 → 摘要 token、状态（待提交 / 已进入上下文 / 已并入上层），点一行展开摘要正文，勾选用于合并。
 - **塔结构**：按 `childBlockIds` 递归，能看出「哪两个 T1 合并成了这个 T2」。
-- **顾问意见**：`plugin:tower/advice` 记录，倒序。
 - **按钮**：立即蒸馏（跑一次观察者）、立即提交（排队）、合并选中（≥2 个同层且已进入上下文的块）、**设置**（就地切到压缩参数，再点一次返回记录）。
 
 块列表和塔结构各自有高度上限、各自内部滚动（`.tw-table-wrap` / `.tw-tree-wrap`），块多到几十个也不会把页面顶长；面板本身不产生横向滚动。窄到 800px（侧栏收成图标）时表格与表单仍然不挤压、不折行溢出：
@@ -170,7 +160,7 @@
 
 ![配置表单](docs/config.png)
 
-插件页里点开本插件卡片，表单直接渲染在描述下方（`plugins.bundle.config` 槽位），**25 项**按「触发与目标(2) / 观察者(11) / 塔(2) / 解压(2) / 顾问(8)」分组，每项带说明、百分比换算与「恢复默认」。观察者与顾问的 provider / model 是下拉框，候选直接取自宿主的模型目录（`llm.listProviders` + `llm.listModels`），和对话框里的模型选择是同一份数据；留空即跟随当前会话。提示词字段是三档下拉 + 只读展示。
+插件页里点开本插件卡片，表单直接渲染在描述下方（`plugins.bundle.config` 槽位），**17 项**按「触发与目标(2) / 观察者(11) / 塔(2) / 解压(2)」分组，每项带说明、百分比换算与「恢复默认」。观察者的 provider / model 是下拉框，候选直接取自宿主的模型目录（`llm.listProviders` + `llm.listModels`），和对话框里的模型选择是同一份数据；留空即跟随当前会话。提示词字段是三档下拉 + 只读展示。
 
 改完点保存即时生效，不用重启。存的是**稀疏覆盖**，落在：
 
@@ -188,24 +178,23 @@
 - **原型补丁依赖方法名**：`compactIfNeeded` / `summarize` 是官方扩展点，但宿主大版本升级后需要复查。缺失时插件会记 warning 并降级为「只提供工具」。
 - **块记录每次现读**：`blocksOf()` 遍历会话全量事件。请求前的排程有 5 秒节流、回合尾才无条件跑一次，所以长会话下是「偶尔 O(事件数)」，不是每个 step。
 - **默认比例未经长会话标定**：`triggerRatio 0.45` 按 1M 窗口推；`distillMinRunRatio 0.05` 是单块分量（≈52K @ 1M），实际频率与块大小待多轮观察。
-- **顾问的端到端调用未验证**：provider / model 已经能在面板里从宿主模型目录选并保存，但还没有一次真实的顾问回答记录（`顾问意见` 一直是 0 条）。
 
 ## 测试
 
 ```bash
 node test/smoke.mjs   # 纯逻辑：配置、块记录、摘要头、选段、分层提交、同层合并、checkpoint 身份、分层库存
-node test/wire.mjs    # 接线：插件装载、工具契约、补丁安装、/advisor 与四条路由注册
-node test/patch.mjs   # 链路：压力→选段→compactRegion→摘要查表、多块提交、合并块可提交、溢出强压、顾问旁路
-node test/state.mjs   # 界面数据：状态快照、块状态判定、顾问记录读取
+node test/wire.mjs    # 接线：插件装载、工具契约、补丁安装与四条路由注册
+node test/patch.mjs   # 链路：压力→选段→compactRegion→摘要查表、多块提交、合并块可提交、溢出强压
+node test/state.mjs   # 界面数据：状态快照、块状态判定
 node test/config.mjs  # 配置存储：路径跟随 DSH_HOME、三级优先级、校验拒绝、原子写、路由、提示词三档
 node test/client.mjs  # 客户端渲染：加载态→数据态→设置态切换，守住每次渲染的钩子数量一致
-node test/prompts.mjs # 提示词：三档指令、顾问留空回退、接管请求的形状（toolHistory/purpose/maxTokens）、截断即失败
+node test/prompts.mjs # 提示词：三档指令、接管请求的形状（toolHistory/purpose/maxTokens）、截断即失败
 ```
 
 七个测试都不启动宿主。`client.mjs` 用一个会记账的假 React 跑组件首帧与数据帧：钩子数量一旦前后不一致，真实 React 会抛 #310、面板整块空白，所以这条必须在测试阶段炸出来。`prompts.mjs` 用一个假 `llm.stream` 捕获请求，确保接管摘要时那四条形状约定一条不少。
 
 ## 真机验证
 
-在独立安装的 DSH 0.2.1-rc.2 与 0.2.2-rc.1 上各跑通一遍全链路：观察者写块 → 分层提交 → 表层替换 → 模型真实调用 `decompress` / `search_context` / `advisor`；Web 面板在 1440 / 1024 / 800 三个宽度下零横向溢出、无元素挤压，配置改值 → 保存 → 重启后仍生效。
+在独立安装的 DSH 0.2.1-rc.2 与 0.2.2-rc.1 上各跑通一遍全链路：观察者写块 → 分层提交 → 表层替换 → 模型真实调用 `decompress` / `search_context`；Web 面板在 1440 / 1024 / 800 三个宽度下零横向溢出、无元素挤压，配置改值 → 保存 → 重启后仍生效。
 
 复现方式与逐条证据见[设计规格](docs/design/DSH-Tower-插件设计规格.md) §12（独立 DSH 副本 + 独立 `DSH_HOME`，用 `tools/check-ui-live.mjs`、`tools/probe-*.mjs` 经 CDP 驱动真实页面，用 `tools/inspect-*.mjs` 读会话日志核对块记录）。
