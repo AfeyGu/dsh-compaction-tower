@@ -1,0 +1,9 @@
+# dsh-compaction-tower 的 bundle 层。
+#
+# 只插一行：插件自己。其余什么都不改——
+#   - 不禁用 dsh-compaction-basic（我们复用它，见 lib/engine.js）；
+#   - 不动任何 preset 的 inject（引擎补丁走原型，不需要加载屏障）；
+#   - 不覆盖任何已有的配置行。
+- insert:
+    - id: compaction-tower
+      name: dsh-compaction-tower

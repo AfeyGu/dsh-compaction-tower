@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Tower",
+    "description": "Distill early history into blocks in the background, commit them with zero model calls, and give the model decompress and search_context to look back."
+  }
+}

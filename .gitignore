@@ -1,0 +1,20 @@
+# 依赖（宿主 peer 依赖，由 profile 提供；本地只是为了跑测试）
+node_modules/
+
+# 打包产物：tgz 由 pnpm pack 生成到上级目录
+dist/
+*.tgz
+
+# decompress / search_context 导出的全文落盘目录（运行时生成）
+.dsh/
+
+# 备份：工作区的 _backup/、profile 快照、旧版本 tgz 一律不进版本库
+_backup/
+backup-*/
+*.bak
+*.orig
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db

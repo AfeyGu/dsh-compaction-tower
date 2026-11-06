@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>上下文占用条 · 配色方案（B 布局）</title>
+<style>
+  :root{ color-scheme: light; }
+  *{box-sizing:border-box}
+  body{
+    margin:0;padding:28px 20px 64px;background:#f5f6f8;color:#1b1f24;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:14px;line-height:1.55;
+  }
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-size:18px;margin:0 0 6px}
+  .sub{color:#6b7280;font-size:13px;margin:0 0 20px}
+  .toolbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 22px;
+    background:#fff;border:1px solid #e3e6ea;border-radius:10px;padding:12px 14px}
+  .toolbar label{color:#6b7280;font-size:12px}
+  input[type=range]{width:280px}
+  .val{font-variant-numeric:tabular-nums;font-weight:600;min-width:76px;display:inline-block}
+  button{background:transparent;color:inherit;border:1px solid #e3e6ea;border-radius:7px;
+    padding:5px 11px;font-size:12px;cursor:pointer}
+  button:hover{border-color:#9aa4b2}
+  .card{background:#fff;border:1px solid #e3e6ea;border-radius:12px;padding:15px 16px 13px;margin-bottom:14px}
+  .card h2{font-size:14px;margin:0 0 2px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .tag{font-size:11px;font-weight:500;color:#6b7280;border:1px solid #e3e6ea;border-radius:999px;padding:1px 8px}
+  .tag.rec{color:#1f5fa8;border-color:#bcd2ea;background:#eef4fb}
+  .card .note{color:#6b7280;font-size:12px;margin:0 0 12px}
+  .theme-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .theme-row .lbl{width:38px;flex:none;font-size:11px;color:#9aa4b2}
+  .barbox{flex:1;min-width:0}
+  .bar{position:relative;height:14px;border-radius:7px;overflow:hidden;background:var(--track)}
+  .seg{position:absolute;top:0;bottom:0;left:0}
+  .real{border-radius:7px 0 0 7px;background:var(--real)}
+  .stripes{background:linear-gradient(180deg, var(--stripe), var(--stripe));
+    background-image:repeating-linear-gradient(135deg, var(--stripes-hi) 0 3px, rgba(0,0,0,0) 3px 8px),
+      linear-gradient(180deg, var(--stripe), var(--stripe))}
+  .deadseg{background:var(--dead)}
+  .chips{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:#6b7280;margin-top:10px}
+  .chip{display:inline-flex;align-items:center;gap:5px}
+  .chip i{width:11px;height:11px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.08)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#6b7280;margin-top:8px}
+  .legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px;vertical-align:-1px}
+  .dark-line{background:#1e2126;border-radius:8px;padding:10px 10px;margin:0 -4px}
+  footer{color:#6b7280;font-size:12px;margin-top:24px}
+  code{background:rgba(127,127,127,.14);padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>上下文占用条 · 配色方案</h1>
+  <p class="sub">统一用方案 B 的布局（实心 = 已用，斜纹 = 当前→触发，灰 = 触发线之后）。窗口 1.0M · 触发 314.6K · 目标 157.3K。拖动滑块看不同水位。</p>
+
+  <div class="toolbar">
+    <label>当前占用</label>
+    <input id="cur" type="range" min="0" max="1000" value="294" step="1">
+    <span class="val" id="curval">294.0K</span>
+    <span style="flex:1"></span>
+    <button id="only-dark">只看深色</button>
+    <button id="only-light">只看浅色</button>
+    <button id="all">两个都看</button>
+  </div>
+
+  <div id="cards"></div>
+
+  <div class="card">
+    <h2>对照：现在线上这一版</h2>
+    <p class="note">蓝填充 + 两根穿出条外的竖线（绿目标 / 橙触发）。</p>
+    <div class="barbox" id="v-now"></div>
+  </div>
+
+  <footer>
+    三段的取色原则：<b>同一色相、只走明度</b>。实心最深（信息主体），斜纹居中（过渡带），灰段最浅（不存在的东西）。
+    这样眼睛读到的是一条「从深到浅」的进度，而不是三个撞色块。
+  </footer>
+</div>
+
+<script>
+  const LIMIT = 1000, TRIGGER = 314.6, TARGET = 157.3;
+  const fmt = (k) => (k >= 1000 ? (k / 1000).toFixed(1) + 'M' : k.toFixed(1) + 'K');
+  const pct = (k) => Math.max(0, Math.min(100, (k / LIMIT) * 100));
+
+  const PALETTES = [
+    {
+      key: 'navy',
+      name: '藏青',
+      tag: '推荐',
+      note: '你说的「石墨偏蓝、深蓝」：深藏青实心，浅灰蓝斜纹，灰段带一点蓝。和 DSH 的灰蓝界面最贴，又不会和强调色抢。',
+      light: { real:'#2b4a72', stripe:'#a9bdd3', hi:'rgba(255,255,255,.55)', dead:'#dbe2ea', track:'#eceff3' },
+      dark:  { real:'#4a6d9c', stripe:'#43566b', hi:'rgba(255,255,255,.16)', dead:'#2e343c', track:'#262b33' },
+    },
+    {
+      key: 'graphite',
+      name: '石墨蓝',
+      tag: '',
+      note: '最安静的一套：实心就是一块石墨，几乎没有色相，斜纹和灰段都压在灰阶里。适合不想让进度条抢视线的场合。',
+      light: { real:'#3d4a5c', stripe:'#aeb8c4', hi:'rgba(255,255,255,.55)', dead:'#dde1e6', track:'#eef0f3' },
+      dark:  { real:'#5a6a80', stripe:'#464f5c', hi:'rgba(255,255,255,.16)', dead:'#2f343b', track:'#24282f' },
+    },
+    {
+      key: 'indigo',
+      name: '靛青',
+      tag: '',
+      note: '比藏青多一点紫味，深色主题下更「亮」、更精神。代价是离 DSH 的中性灰蓝稍远。',
+      light: { real:'#3a4a86', stripe:'#b2b9da', hi:'rgba(255,255,255,.55)', dead:'#dfe1ee', track:'#eff0f7' },
+      dark:  { real:'#5f6fc0', stripe:'#454b6b', hi:'rgba(255,255,255,.16)', dead:'#2e3140', track:'#24252f' },
+    },
+    {
+      key: 'blue',
+      name: '同色蓝阶',
+      tag: '最保守',
+      note: '和界面强调色（#4096ff 系）同族，只走明度：深蓝 → 浅蓝 → 灰蓝。最不会出错，但也最普通。',
+      light: { real:'#1f5fa8', stripe:'#9dbbdc', hi:'rgba(255,255,255,.55)', dead:'#dbe4ee', track:'#edf1f6' },
+      dark:  { real:'#3f86d8', stripe:'#33506e', hi:'rgba(255,255,255,.16)', dead:'#2a3038', track:'#232830' },
+    },
+    {
+      key: 'teal',
+      name: '蓝绿（石板）',
+      tag: '',
+      note: '带一点绿味的冷色，比纯蓝更有「数据」感。如果你以后想加「危险红」做对比，这套的余地最大。',
+      light: { real:'#2f5d63', stripe:'#a8c3c5', hi:'rgba(255,255,255,.55)', dead:'#dbe4e5', track:'#eef2f3' },
+      dark:  { real:'#4f8a90', stripe:'#3c5658', hi:'rgba(255,255,255,.16)', dead:'#2b3436', track:'#232a2b' },
+    },
+  ];
+
+  const cards = document.getElementById('cards');
+
+  function barMarkup(variant, current) {
+    const now = pct(current), trigger = pct(TRIGGER), target = pct(TARGET);
+    const stripes = `<div class="seg stripes" style="left:${Math.min(now, trigger)}%;width:${Math.max(0, trigger - Math.min(now, trigger))}%"></div>`;
+    const dead = `<div class="seg deadseg" style="left:${trigger}%;right:0"></div>`;
+    const real = `<div class="seg real" style="width:${now}%"></div>`;
+    if (variant === 'now') {
+      return `<div class="bar" style="--track:#e8ebef;overflow:visible">
+        <div class="seg" style="width:${now}%;background:rgba(64,150,255,.78);border-radius:7px 0 0 7px"></div>
+        <div style="position:absolute;left:${target}%;top:-8px;bottom:-8px;width:2px;background:#28cd78;box-shadow:0 0 0 1px rgba(0,0,0,.3)"></div>
+        <div style="position:absolute;left:${trigger}%;top:-8px;bottom:-8px;width:2px;background:#ffaa00;box-shadow:0 0 0 1px rgba(0,0,0,.3)"></div>
+      </div>`;
+    }
+    return `<div class="bar">${dead}${stripes}${real}</div>`;
+  }
+
+  function styleVars(p) {
+    return `--real:${p.real};--stripe:${p.stripe};--stripes-hi:${p.hi};--dead:${p.dead};--track:${p.track};`;
+  }
+
+  function buildCards() {
+    cards.innerHTML = '';
+    for (const p of PALETTES) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.palette = p.key;
+      card.innerHTML = `
+        <h2>${p.name}${p.tag ? `<span class="tag ${p.tag === '推荐' ? 'rec' : ''}">${p.tag}</span>` : ''}</h2>
+        <p class="note">${p.note}</p>
+        <div class="theme-row light-row">
+          <span class="lbl">浅色</span>
+          <div class="barbox"><div class="bar-holder" data-theme="light" style="${styleVars(p.light)}"></div></div>
+        </div>
+        <div class="theme-row dark-row">
+          <span class="lbl" style="color:#9aa4b2">深色</span>
+          <div class="barbox dark-line"><div class="bar-holder" data-theme="dark" style="${styleVars(p.dark)}"></div></div>
+        </div>
+        <div class="chips">
+          <span class="chip"><i style="background:${p.light.real}"></i>实心 ${p.light.real}</span>
+          <span class="chip"><i style="background:${p.light.stripe}"></i>斜纹 ${p.light.stripe}</span>
+          <span class="chip"><i style="background:${p.light.dead}"></i>灰段 ${p.light.dead}</span>
+        </div>
+        <div class="legend">
+          <span><i style="background:${p.light.real}"></i>已用</span>
+          <span><i style="background:${p.light.stripe}"></i>当前 → 触发</span>
+          <span><i style="background:${p.light.dead}"></i>触发之后（到不了）</span>
+        </div>`;
+      cards.appendChild(card);
+    }
+  }
+
+  function render() {
+    const current = Number(slider.value);
+    label.textContent = fmt(current);
+    for (const holder of document.querySelectorAll('.bar-holder')) {
+      holder.innerHTML = barMarkup('B', current);
+    }
+    const nowBox = document.getElementById('v-now');
+    if (nowBox) nowBox.innerHTML = barMarkup('now', current);
+  }
+
+  buildCards();
+  const slider = document.getElementById('cur');
+  const label = document.getElementById('curval');
+  slider.addEventListener('input', render);
+  render();
+
+  const setRows = (which) => {
+    for (const row of document.querySelectorAll('.light-row')) row.style.display = which === 'dark' ? 'none' : '';
+    for (const row of document.querySelectorAll('.dark-row')) row.style.display = which === 'light' ? 'none' : '';
+  };
+  document.getElementById('only-dark').addEventListener('click', () => setRows('dark'));
+  document.getElementById('only-light').addEventListener('click', () => setRows('light'));
+  document.getElementById('all').addEventListener('click', () => setRows('all'));
+</script>
+</body>
+</html>
