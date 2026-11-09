@@ -6,7 +6,7 @@
 import { Session } from '@deepseek-ai/dsh-session';
 import { DEFAULTS, resolveConfig } from '../lib/config.js';
 import { appendBlock, appendCommit, blockHeader, checkpointIndex, checkpointOwner, nextBlockId, readBlocks, readCommits, refOf } from '../lib/core.js';
-import { headRun, planCommits, planObservation, protectedTail, selectMergeRun, selectRawRun, usable } from '../lib/select.js';
+import { headRun, planCommits, planObservation, planTarget, protectedTail, recoveryRatio, selectMergeRun, selectRawRun, usable } from '../lib/select.js';
 import { Tower } from '../lib/tower.js';
 import { closedStepEnd } from '../lib/core.js';
 
@@ -236,20 +236,43 @@ equal('step 第一条消息也算这个 step', closedStepEnd(stepSession, 1), 5)
 equal('未闭合的 step 返回 null', closedStepEnd(stepSession, 7), null);
 equal('不属于任何 step 的消息返回 null', closedStepEnd(stepSession, 0), null);
 
-// ── 观察配额：从最底层开始发名额 ─────────────────────────────────────────
-const observation = (available, inventory, concurrency = 4) => planObservation({
-  available: new Map(available),
-  inventory: new Map(inventory),
-  reserveTokens: 200,   // 目标库存 200 token
-  unitTokens: 50,       // 一个单位 50 token → 每层目标 4 个
-  concurrency,
+// ── 备货目标：由离目标线的距离推出，不按层配固定份额 ─────────────────────
+const targetOf = (content, extra = {}) => planTarget({
+  usable: 100, content, triggerRatio: 0.6, targetRatio: 0.4, unitRatio: 0.05, recovery: 0.8, ...extra,
 });
-equal('只有底层有料时全给底层', observation([[1, 5]], []), [{ tier: 1, count: 4 }]);
-equal('底层 2 个 + 二层 1 个，名额够就都发', observation([[1, 2], [2, 1]], []), [{ tier: 1, count: 2 }, { tier: 2, count: 1 }]);
-equal('底层吃满名额，二层不发', observation([[1, 5], [2, 3]], [], 2), [{ tier: 1, count: 2 }]);
-equal('某层库存已够就不发，把名额让给上层', observation([[1, 5], [2, 3]], [[1, 200]]), [{ tier: 2, count: 3 }]);
-equal('库存够的层跳过、不够的层按缺口发', observation([[1, 5]], [[1, 150]]), [{ tier: 1, count: 1 }]);
-equal('并发为 0 时什么都不发', observation([[1, 5]], [], 0), []);
+equal('没到目标线不备货', targetOf(30), 0);
+equal('越线时备够缺口加垫', targetOf(70), 24);          // min(20, 70−40+5) + 5×0.8
+equal('爬升段按距离递进', targetOf(44), 13);            // min(20, 9) + 4
+equal('触发线变了目标跟着变', targetOf(70, { triggerRatio: 0.7 }), 34);
+
+// ── 回收率：同层最近 10 块的中位数 ──────────────────────────────────────
+const ratioBlock = (tier, covered, summary) => ({ tier, coveredTokens: covered, summaryTokens: summary });
+equal('样本不足用缺省值', recoveryRatio([ratioBlock(1, 100, 40)], 1, 0.8), 0.8);
+equal('三个同层块校准出实测值', recoveryRatio([ratioBlock(1, 100, 40), ratioBlock(1, 100, 40), ratioBlock(1, 100, 40)], 1, 0.8), 0.6);
+equal('不同层不混算', recoveryRatio([ratioBlock(2, 100, 40), ratioBlock(2, 100, 40), ratioBlock(2, 100, 40)], 1, 0.8), 0.8);
+equal('实测低于下界被接住', recoveryRatio([ratioBlock(1, 100, 95), ratioBlock(1, 100, 95), ratioBlock(1, 100, 95)], 1, 0.8), 0.5);
+
+// ── 观察配额：按缺口逐层补货 ────────────────────────────────────────────
+const materialsOf = (entries) => new Map(entries.map(([level, units]) => [level, { units, unitTokens: 50 }]));
+const observation = (materialEntries, inventory = [], options = {}) => planObservation({
+  targetTokens: options.target ?? 200,   // 目标库存 200 token
+  inventory: new Map(inventory),
+  materials: materialsOf(materialEntries),
+  recovery: (level) => (level === 0 ? (options.r0 ?? 0.8) : (options.r1 ?? 0.6)),
+  concurrency: options.concurrency ?? 4,
+});
+// 一层一个单位 50 tok、r=0.8 → 每块净回收 40；目标 200 需要 5 块。
+equal('只有底层有料时全给底层', observation([[0, 5]]), [{ level: 0, count: 4 }]);
+equal('底层 2 个 + 二层 1 个，名额够就都发', observation([[0, 2], [1, 1]]), [{ level: 0, count: 2 }, { level: 1, count: 1 }]);
+equal('底层吃满名额，二层不发', observation([[0, 5], [1, 3]], [], { concurrency: 2 }), [{ level: 0, count: 2 }]);
+equal('底层库存已够就整轮不派发', observation([[0, 5], [1, 3]], [[1, 200]]), []);
+equal('底层库存不足时按缺口补', observation([[0, 5]], [[1, 150]]), [{ level: 0, count: 2 }]);
+equal('并发为 0 时什么都不发', observation([[0, 5]], [], { concurrency: 0 }), []);
+// 这条是本轮的核心：T2 补满不等于 T1 满。
+equal('T2 库存补满仍要给 T1 补货', observation([[0, 5]], [[1, 0], [2, 200]]), [{ level: 0, count: 4 }]);
+equal('T1 没材料时缺口漏到二层', observation([[0, 0], [1, 3]], []), [{ level: 1, count: 3 }]);
+equal('二层库存补上后不再派发', observation([[0, 0], [1, 3]], [[2, 200]]), []);
+equal('目标为 0 时不派发', observation([[0, 5]], [], { target: 0 }), []);
 
 equal('原文段跳过 system 与受保护尾', selectRawRun(nodes, {
   systemSeqs: new Set([0]),

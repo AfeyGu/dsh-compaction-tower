@@ -8,6 +8,7 @@
  * 跑法：node test/patch.mjs
  */
 import { Tower } from '../lib/tower.js';
+import { planTarget } from '../lib/select.js';
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic';
 import { installEnginePatches } from '../lib/engine.js';
 
@@ -93,13 +94,17 @@ const idB = tower.allocateBlockId(allocSession, [{ blockId: 'b00001' }]);
 check('并发分配不会撞块号', idA !== idB, `${idA} / ${idB}`);
 check('块号按已有最大号递增', idA === 'b00002' && idB === 'b00003', `${idA} / ${idB}`);
 
-// ── 1c. 库存目标由公式推导，不再是配置项 ────────────────────────────────
-// 窗口 10000、触发 0.45、目标 0.15、单位 0.05 → 缺口 3000；一块回收 500×0.8=400
-// → 3000/400 = 7.5 → 8 块，再 +1 安全垫 = 9
-const reserve = tower.reserveOf(10000);
-check('库存目标按公式算', reserve.blocks === 9, JSON.stringify(reserve));
-check('库存按回收量记账而不是原料量', reserve.reclaim === 400 && reserve.tokens === 3600,
-  `${reserve.reclaim}/${reserve.tokens}`);
+// ── 1c. 备货目标由「离目标线的距离」推导，不再是固定份数 ──────────────────
+// 窗口 10000、触发 0.45、目标 0.15、单位 0.05、r=0.8：
+// 内容 2000（< 目标线 1500？不，1500 < 2000）→ min(3000, 2000−1500+500) + 400 = 1000 + 400
+const targetBelowTrigger = planTarget({
+  usable: 10000, content: 2000, triggerRatio: 0.45, targetRatio: 0.15, unitRatio: 0.05, recovery: 0.8,
+});
+check('备货目标按距离推', targetBelowTrigger === 1400, String(targetBelowTrigger));
+const targetAtTrigger = planTarget({
+  usable: 10000, content: 5000, triggerRatio: 0.45, targetRatio: 0.15, unitRatio: 0.05, recovery: 0.8,
+});
+check('越线时备够缺口加垫', targetAtTrigger === 3400, String(targetAtTrigger));   // 3000 + 400
 
 // ── 1d. provider 不返回 usage：退回 字符/4 估算，判定与提交照常 ──────────
 // 有的网关/本地端点不报 usage，此时 tokenMeter 的 baseline 是 estimated。
