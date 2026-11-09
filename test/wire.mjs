@@ -115,6 +115,22 @@ installEnginePatches(fakeTower('B'));
 BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'pressure', undefined);
 check('重装后补丁改指向新实例', JSON.stringify(rebindCalls) === JSON.stringify(['A', 'B']), rebindCalls.join(','));
 
+// ── 插件模块被重新加载后，补丁仍指向新实例 ──────────────────────────────
+// cordis 重装插件时会新建模块实例。若补丁把实例存在模块级变量里，
+// 原型上的旧闭包读的是旧模块的变量，新模块换自己的那份，等于没换 —— 现象是
+// 「面板说还没判定过」「观察者说引擎实例还没露面」。用带 query 的动态 import
+// 造出第二个模块实例，复现这条。
+const freshEngine = await import('../lib/engine.js?instance=2');
+const freshCalls = [];
+freshEngine.installEnginePatches({
+  rememberEngine() {},
+  compactIfNeeded() { freshCalls.push('fresh'); return null; },
+  serveSummary() { freshCalls.push('fresh-sum'); return null; },
+  manualCompact() { freshCalls.push('fresh-manual'); return null; },
+});
+BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'pressure', undefined);
+check('新模块实例能接管旧闭包', freshCalls.length === 1 && freshCalls[0] === 'fresh', freshCalls.join(','));
+
 // ── package.json 不能带 BOM ─────────────────────────────────────────────
 // 宿主装包时要 JSON.parse 它，BOM 会让整条安装被拒（Unexpected token '\uFEFF'）。
 // pnpm pack 会重排 JSON 把 BOM 抹掉，所以本地装没事；npm publish 是原样拷贝，
