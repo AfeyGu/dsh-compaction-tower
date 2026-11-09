@@ -1,5 +1,7 @@
 # 压缩逻辑
 
+> 本文讲**提交侧**（选段、平衡点、token 口径、提示词）。观察者**蒸多少、蒸哪层**的派发策略见 [replenishment.md](replenishment.md)。
+
 ## 记号
 
 ```

@@ -131,7 +131,13 @@ DSH 的分块自动压缩工具：**无需主动压缩** —— 旧历史提前�
 
 块还能继续合并成更高的层（T2、T3…），层数不设上限；最近 N 步受保护区保护，不会被换走。
 
-设计推导、两种 token 口径、提示词的细节见 [docs/design/compaction.md](docs/design/compaction.md)。
+设计文档：
+
+| 文档 | 讲什么 |
+|---|---|
+| [compaction.md](docs/design/compaction.md) | 压缩逻辑的推导：选段、工具配对平衡、两种 token 口径、提示词 |
+| [replenishment.md](docs/design/replenishment.md) | 观察者按缺口补货：目标库存 `target`、逐层抵扣的 `need`、回收率 `r`、紧急态 |
+| [DSH-Tower-插件设计规格.md](docs/design/DSH-Tower-插件设计规格.md) | 完整设计规格与真机验证记录（历史设计记录） |
 
 ## 界面
 
