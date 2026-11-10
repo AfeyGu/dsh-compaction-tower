@@ -226,3 +226,8 @@ node test/prompts.mjs # 提示词：三档指令、接管请求的形状（toolH
 在独立安装的 DSH 0.2.1-rc.2 与 0.2.2-rc.1 上各跑通一遍全链路：观察者写块 → 分层提交 → 表层替换 → 模型真实调用 `decompress` / `search_context`；Web 面板在 1440 / 1024 / 800 三个宽度下零横向溢出、无元素挤压，配置改值 → 保存 → 重启后仍生效。
 
 复现方式与逐条证据见[设计规格](docs/design/DSH-Tower-插件设计规格.md) §12（独立 DSH 副本 + 独立 `DSH_HOME`，用 `tools/check-ui-live.mjs`、`tools/probe-*.mjs` 经 CDP 驱动真实页面，用 `tools/inspect-*.mjs` 读会话日志核对块记录）。
+
+## 社区
+
+本项目在 [LINUX DO](https://linux.do/) 开源推广。
+
