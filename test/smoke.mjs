@@ -486,6 +486,32 @@ equal('认领的块盖不到已离开表层的原文，因此永不提交', usab
 await importTower.ensureImported({ session: importSession });
 equal('重复认领是幂等的', readBlocks(importSession).length, 1);
 
+// ── 块号以账本为准，不信内存占位表 ──────────────────────────────────────
+// 插件重载会留下旧实例、team 会话可能同时被多个实例写入，各自算各自的号，
+// 结果五个块一起叫 b00006。分配时必须重新读账本。
+const idSession = Session.create('tower-id');
+const stale = [];                                  // 并发开始前拍的快照
+const idTowerA = new Tower({}, resolveConfig({}));
+const idTowerB = new Tower({}, resolveConfig({})); // 另一个实例 = 重载后的新/旧实例
+const idA = idTowerA.allocateBlockId(idSession, stale);
+appendBlock(idSession, {
+  blockId: idA, tier: 1, covers: [0], coveredTokens: 10, summaryTokens: 2, childBlockIds: [],
+  summary: [{ type: 'text', text: 'x' }], createdAt: new Date().toISOString(),
+});
+const idB = idTowerB.allocateBlockId(idSession, stale);   // 快照仍是空的
+equal('另一个实例从账本读到已写入的块号', idB, 'b00002');
+check('两个实例不会算出同一个号', idA !== idB);
+
+// ── 材料重叠：跨实例写账本前再查一次 ────────────────────────────────────
+const overlapSession = Session.create('tower-overlap');
+appendBlock(overlapSession, {
+  blockId: 'b00001', tier: 1, covers: [10, 11], coveredTokens: 10, summaryTokens: 2, childBlockIds: [],
+  summary: [{ type: 'text', text: 'x' }], createdAt: new Date().toISOString(),
+});
+const overlapTower = new Tower({}, resolveConfig({}));
+equal('重叠检测认出已被覆盖的材料', overlapTower.overlappingBlock(overlapSession, [11, 12])?.blockId, 'b00001');
+equal('不重叠时返回 undefined', overlapTower.overlappingBlock(overlapSession, [12, 13]), undefined);
+
 // ── 结果 ────────────────────────────────────────────────────────────────
 if (failures.length === 0) {
   console.log(`✅ smoke: ${passed} 项全部通过`);

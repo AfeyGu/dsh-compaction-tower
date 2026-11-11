@@ -8,6 +8,7 @@
  * 跑法：node test/patch.mjs
  */
 import { Tower } from '../lib/tower.js';
+import { Session } from '@deepseek-ai/dsh-session';
 import { planTarget } from '../lib/select.js';
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic';
 import { installEnginePatches } from '../lib/engine.js';
@@ -88,7 +89,7 @@ check('pending 已清理', tower.pending.get(session) === undefined);
 check('提交计数 +1', tower.stats.committed === 1 && tower.stats.served === 1);
 
 // ── 1b. 块号分配：并发任务共享同一份 blocks 快照也不能撞号 ────────────────
-const allocSession = { id: 'alloc' };
+const allocSession = Session.create('alloc');
 const idA = tower.allocateBlockId(allocSession, [{ blockId: 'b00001' }]);
 const idB = tower.allocateBlockId(allocSession, [{ blockId: 'b00001' }]);
 check('并发分配不会撞块号', idA !== idB, `${idA} / ${idB}`);
