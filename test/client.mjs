@@ -150,6 +150,7 @@ const fakeState = {
     summary: '摘要正文',
   }],
   composition: { tiers: [{ tier: 2, count: 1 }, { tier: 1, count: 3 }], raw: 42 },
+  inflight: [{ blockId: 'b00009', tier: 1, count: 46, coveredLabel: '55.9K', startedAt: 1 }],
   sessions: ['session-test'],
   pressure: { kind: 'no-block', blocks: 5, run: 120, total: 440900, trigger: 314600 },
   observation: { kind: 'no-material', unit: 52429, protected: 400 },
@@ -192,6 +193,7 @@ try {
     texts(loaded).some((text) => text === '当前组装：T2 1 块 + T1 3 块 + 原文 42 条'), JSON.stringify(texts(loaded)));
   check('显示上次观察（为什么没蒸）', texts(loaded).some((text) => text.includes('没有可蒸材料')),
     JSON.stringify(texts(loaded).filter((text) => text.includes('上次观察'))));
+  check('正在总结的块显示为虚行', texts(loaded).some((text) => text === '总结中'), JSON.stringify(texts(loaded).filter((text) => text.includes('总结'))));
   check('显示上次判定（为什么没压）', texts(loaded).some((text) => text.includes('没有可提交的块')),
     JSON.stringify(texts(loaded).filter((text) => text.includes('上次判定'))));
 
