@@ -30,6 +30,11 @@ check('targetRatio >= triggerRatio 被拒', threw);
 threw = false;
 try { resolveConfig({ nope: 1 }); } catch { threw = true; }
 check('未知配置项被拒', threw);
+equal('提交顺序默认顶层优先', resolveConfig({}).commitOrder, 'top-first');
+equal('提交顺序可切底层优先', resolveConfig({ commitOrder: 'bottom-first' }).commitOrder, 'bottom-first');
+threw = false;
+try { resolveConfig({ commitOrder: 'middle-out' }); } catch { threw = true; }
+check('未知提交顺序被拒', threw);
 
 // ── 会话 + 块记录 ───────────────────────────────────────────────────────
 const session = Session.create('tower-smoke');
@@ -183,6 +188,24 @@ equal('摘要不比原文小的块被剔除', planCommits({
   runSeqs: [1], surfaceSeqs: new Set([1]), contentTokens: 10000, targetTokens: 0,
 }).blocks, []);
 
+// 提交顺序可配：顶层优先先交高层（等价于先动最老的 checkpoint 区），回落才轮到低层。
+equal('顶层优先：先交 T2 再回落 T1', planCommits({
+  blocks: commitBlocks, runSeqs: [1, 2, 3, 5, 6], surfaceSeqs: allSurface,
+  contentTokens: 10000, targetTokens: 1000, order: 'top-first',
+}).blocks.map((b) => b.blockId), ['b3', 'b1', 'b2']);
+equal('顶层优先：高层一块达标就不动低层', planCommits({
+  blocks: commitBlocks, runSeqs: [1, 2, 3, 5, 6], surfaceSeqs: allSurface,
+  contentTokens: 10000, targetTokens: 9900, order: 'top-first',
+}).blocks.map((b) => b.blockId), ['b3']);
+equal('顶层优先：达标即停也先吃高层', planCommits({
+  blocks: commitBlocks, runSeqs: [1, 2, 3, 5, 6], surfaceSeqs: allSurface,
+  contentTokens: 10000, targetTokens: 8000, order: 'top-first',
+}).blocks.map((b) => b.blockId), ['b3', 'b1']);
+equal('没有高层候选时两种顺序一致', planCommits({
+  blocks: commitBlocks, runSeqs: [1, 2, 3], surfaceSeqs: new Set([1, 2, 3]),
+  contentTokens: 10000, targetTokens: 1000, order: 'top-first',
+}).blocks.map((b) => b.blockId), ['b1', 'b2']);
+
 // 材料是否还可用：提交计划与分层库存共用的第一道筛。
 equal('材料还在表层：可用', usable(
   { covers: [1, 2], coveredTokens: 100, summaryTokens: 10 }, { surfaceSeqs: new Set([1, 2]) },
@@ -260,6 +283,7 @@ const observation = (materialEntries, inventory = [], options = {}) => planObser
   materials: materialsOf(materialEntries),
   recovery: (level) => (level === 0 ? (options.r0 ?? 0.8) : (options.r1 ?? 0.6)),
   concurrency: options.concurrency ?? 4,
+  order: options.order,
 });
 // 一层一个单位 50 tok、r=0.8 → 每块净回收 40；目标 200 需要 5 块。
 equal('只有底层有料时全给底层', observation([[0, 5]]), [{ level: 0, count: 4 }]);
@@ -273,6 +297,21 @@ equal('T2 库存补满仍要给 T1 补货', observation([[0, 5]], [[1, 0], [2, 2
 equal('T1 没材料时缺口漏到二层', observation([[0, 0], [1, 3]], []), [{ level: 1, count: 3 }]);
 equal('二层库存补上后不再派发', observation([[0, 0], [1, 3]], [[2, 200]]), []);
 equal('目标为 0 时不派发', observation([[0, 5]], [], { target: 0 }), []);
+
+// ── 观察配额：层序跟 commitOrder 同向（顶层优先的镜像） ──────────────────
+// 目标 200：先发二层（每块净回收 30 → 3 块），余下缺口 110 再给底层 1 块。
+equal('顶层优先：先发高层名额', observation([[0, 5], [1, 3]], [], { order: 'top-first' }),
+  [{ level: 1, count: 3 }, { level: 0, count: 1 }]);
+equal('顶层优先：高层库存够就整轮不派发', observation([[0, 5], [1, 3]], [[2, 200]], { order: 'top-first' }), []);
+// 镜像版核心：T1 库存补满不等于 T2 满（与上面「T2 补满仍给 T1 补货」对称）。
+equal('顶层优先：T1 库存补满仍要给 T2 补货', observation([[1, 3]], [[1, 200]], { order: 'top-first' }), [{ level: 1, count: 3 }]);
+equal('顶层优先：高层吃满名额，底层不发', observation([[0, 5], [1, 3]], [], { order: 'top-first', concurrency: 2 }), [{ level: 1, count: 2 }]);
+// 原文枯竭、T1 库存还在：T1 的存货也要顶账 —— 访问集合是「库存层 ∪ 材料层」，
+// 只遍历材料的话 inv[1] 永远不扣，缺口虚高、多蒸浪费。
+equal('顶层优先：原文枯竭时 T1 库存仍顶账', observation([[1, 3]], [[1, 150]], { order: 'top-first' }), [{ level: 1, count: 3 }]);
+equal('顶层优先：目标为 0 时不派发', observation([[0, 5]], [], { target: 0, order: 'top-first' }), []);
+// 库存顶账的口径对两个方向同样成立：有库存没材料的层也顶账（以前会被漏掉）。
+equal('有库存无材料的层也顶账', observation([[0, 2], [2, 3]], [[2, 100]]), [{ level: 0, count: 2 }, { level: 2, count: 1 }]);
 
 equal('原文段跳过 system 与受保护尾', selectRawRun(nodes, {
   systemSeqs: new Set([0]),

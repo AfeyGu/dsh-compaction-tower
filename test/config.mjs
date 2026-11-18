@@ -6,7 +6,7 @@
  *
  * 跑法：node test/config.mjs
  */
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -47,6 +47,19 @@ check('临时文件没有残留', readdirSync(join(home, 'storages', 'compaction
 // ── 重新装载后仍然生效（等价于重启宿主） ────────────────────────────────
 const reloaded = new ConfigStore({ triggerRatio: 0.3 });
 equal('重启后读到覆盖值', reloaded.config.targetRatio, 0.1);
+
+// ── 旧版本留下的键不能连累整份配置 ──────────────────────────────────────
+// 磁盘上可能还躺着已删除的 advisor*（0.1.34 之前写的）。读的时候要丢掉它们、
+// 保住其余设置，并顺手把清理后的结果写回；不能像补丁那样整份拒掉。
+writeFileSync(configPath(), JSON.stringify({
+  targetRatio: 0.2, advisorProvider: 'magpie', advisorModel: 'auto/glm',
+}), 'utf8');
+const healed = new ConfigStore({ triggerRatio: 0.3 });
+equal('废弃键被丢掉，其余设置照常生效', healed.config.targetRatio, 0.2);
+check('废弃键不会变成配置项', healed.config.advisorProvider === undefined);
+check('提示里点名了被清掉的键', String(healed.loadProblem).includes('advisorProvider'), String(healed.loadProblem));
+equal('清理结果已写回磁盘', JSON.parse(readFileSync(configPath(), 'utf8')), { targetRatio: 0.2 });
+writeFileSync(configPath(), JSON.stringify({ targetRatio: 0.1 }), 'utf8');
 
 // ── 校验 ────────────────────────────────────────────────────────────────
 let threw = false;
@@ -107,6 +120,18 @@ threw = false;
 try { store.save({ summaryPromptMode: 'nope' }); } catch { threw = true; }
 check('未知档位被拒', threw);
 store.reset(['summaryPromptMode', 'summaryMaxTokens']);
+
+// ── 提交顺序：底层/顶层优先 ─────────────────────────────────────────────
+const orderField = allFields.find((field) => field.key === 'commitOrder');
+equal('提交顺序默认顶层优先', orderField?.value, 'top-first');
+check('提交顺序下拉带两个候选项', Array.isArray(orderField?.options) && orderField.options.length === 2);
+store.save({ commitOrder: 'bottom-first' });
+equal('提交顺序可保存成非默认档', store.config.commitOrder, 'bottom-first');
+threw = false;
+try { store.save({ commitOrder: 'middle-out' }); } catch { threw = true; }
+check('未知提交顺序被拒', threw);
+store.reset(['commitOrder']);
+equal('reset 回到默认提交顺序', store.config.commitOrder, DEFAULTS.commitOrder);
 
 // ── 路由：GET / POST /tower/config ──────────────────────────────────────
 const routes = new Map();

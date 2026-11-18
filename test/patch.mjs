@@ -199,6 +199,37 @@ await multiTower.compactIfNeeded(multiEngine, agent, 'pressure', signal);
 check('多块提交按顺序各走一次', JSON.stringify(multiCalls) === JSON.stringify([[1, 1], [2, 2]]));
 check('多块提交计数 +2', multiTower.stats.committed === 2);
 
+// ── 6b. 提交顺序可配：顶层优先先交高层 ─────────────────────────────────
+// 同样三块（T2 盖 [2]，T1 盖 [1]、[3]）：底层优先从 T1 交起，顶层优先先交 T2。
+// 缺键的手写配置必须退回底层优先（orderOf 的宽松判断）。
+const orderedBlocks = () => [
+  { blockId: 'b00001', tier: 1, covers: [1], summary: [{ type: 'text', text: '低层一' }], coveredTokens: 2000, summaryTokens: 100 },
+  { blockId: 'b00002', tier: 2, covers: [2], summary: [{ type: 'text', text: '高层' }], coveredTokens: 3000, summaryTokens: 150 },
+  { blockId: 'b00003', tier: 1, covers: [3], summary: [{ type: 'text', text: '低层二' }], coveredTokens: 4000, summaryTokens: 150 },
+];
+const runOrdered = async (commitOrder) => {
+  const instance = new Tower(ctx, { ...tower.config, targetRatio: 0.05, commitOrder });
+  instance.blocksOf = () => orderedBlocks();
+  const calls = [];
+  const orderedEngine = {
+    async compactRegion(start, end) {
+      calls.push([start, end]);
+      await instance.serveSummary(orderedEngine, async () => ({ summary: [] }), { messages: [] }, agent, signal);
+      return { startSeq: start, endSeq: end };
+    },
+  };
+  await instance.compactIfNeeded(orderedEngine, agent, 'pressure', signal);
+  return { calls, committed: instance.stats.committed };
+};
+const bottomRun = await runOrdered('bottom-first');
+check('底层优先从低层交起',
+  JSON.stringify(bottomRun.calls) === JSON.stringify([[1, 1], [3, 3], [2, 2]]) && bottomRun.committed === 3,
+  JSON.stringify(bottomRun.calls));
+const topRun = await runOrdered(undefined);
+check('缺键配置按产品默认：顶层优先先交高层',
+  JSON.stringify(topRun.calls) === JSON.stringify([[2, 2], [1, 1], [3, 3]]) && topRun.committed === 3,
+  JSON.stringify(topRun.calls));
+
 // ── 7. T2 识别：checkpoint 消息正文里带块头 ────────────────────────────
 const checkpointEvents = new Map([[
   10,
