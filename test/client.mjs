@@ -290,6 +290,21 @@ try {
   check('视图切换不抛错', false, error.message);
 }
 
+// 未打开的会话：宿主只读投影、会话没恢复活跃——面板要给人话提示，而不是把 404 原文甩脸上
+try {
+  const slots = slotsOf(api.TowerView);
+  slots[0].setter(null);
+  slots[7].setter('这个会话还没在引擎里打开——发送一条消息后，这里会显示压缩状态。');
+  const closedFrame = render(createElement(api.TowerView, { sessionId: 'session-test' }));
+  check('未打开的会话渲染成提示而非报错',
+    texts(closedFrame).some((text) => text.includes('还没在引擎里打开'))
+      && !hosts(closedFrame).some((node) => typeof node.props.className === 'string'
+        && node.props.className.includes('tw-err')),
+    JSON.stringify(texts(closedFrame)));
+} catch (error) {
+  check('未打开会话的提示渲染不抛错', false, error.message);
+}
+
 // 配置面板自己也能渲染（插件页那条路）
 try {
   render(createElement(api.ConfigPanel, { embedded: true }));
