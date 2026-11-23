@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tower 面板重设计 · demo</title>
+<!--
+  面板重设计的独立 demo（无依赖、无构建，浏览器直接打开）。
+
+  · 数据是手工快照，字段名对齐 GET /tower/state（lib/state.js 的 buildState）；
+    每个数字都能回溯到快照字段，判定与面板用同一套数。
+  · 占用条的公式照搬 lib/client.js 的 UsageBar（fixedPct / percent / trigger / band / over）。
+  · 三档演示状态对应压缩循环的三个时刻：未越线 → 已越线（计划提交）→ 刚提交（落回区间）。
+  · 支持 URL 参数：?theme=dark|light & state=under|over|after
+  · 本文件只进仓库 docs/design/，不进发布包（package.json 的 files 不含它）。
+-->
+<style>
+/* ── 令牌 ──────────────────────────────────────────────────────────── */
+:root, [data-theme="dark"] {
+  --bg: #101215;
+  --panel: #1a1e23;
+  --panel-2: #232830;
+  --line: rgba(255,255,255,.09);
+  --line-2: rgba(255,255,255,.05);
+  --ink: #e7e5e0;
+  --ink-2: rgba(231,229,224,.64);
+  --ink-3: rgba(231,229,224,.42);
+  --accent: #5c9fe0;            /* 交互主色（按钮），与宿主蓝一脉 */
+  --amber: #e2a63e;             /* 活内容（压力计水银）与「余量」读数 */
+  --verm: #e5695c;              /* 越线 / 触发线 */
+  --green: #5fbf87;             /* 已进入上下文 / 目标线 */
+  --cyan: #6fd3e0;              /* 库存 / 进行中（待提交、总结中） */
+  --t1: #7fd8e6;  --t2: #6fb1ea;  --t3: #9ba3f0;  --t4: #c09cf0;   /* 层色阶：同族渐深 */
+  --fill-over:    #d65548;
+  --fill-fixed:   #0b0d10;
+  --shadow: none;
+}
+/* 水银配色（两版可切，默认钢青）：
+   研究结论（Usage UI / Taiga「Single color」/ Apple HIG）——现代用量条 = 平面单色填充，
+   深度感用「顶部 1px 内嵌亮线」，不用大跨度垂直渐变（那是 Web 2.0 水晶条的土味来源）；
+   cool = 内容钢青（平静），触发线琥珀（换班哨），越线段才染朱红；
+   warm = 琥珀水银（蒸馏=加热的隐喻），触发线朱红。 */
+:root { --fill-content: #4d8fd6; --tick-c: var(--amber); }
+[data-mercury="warm"] { --fill-content: #d9a13b; --tick-c: var(--verm); }
+[data-theme="light"] {
+  --bg: #e8ebee;
+  --panel: #ffffff;
+  --panel-2: #eef1f4;
+  --line: rgba(24,28,33,.15);
+  --line-2: rgba(24,28,33,.07);
+  --ink: #22262b;
+  --ink-2: rgba(34,38,43,.68);
+  --ink-3: rgba(34,38,43,.46);
+  --accent: #2f7fc2;
+  --amber: #8a6210;
+  --verm: #b83c30;
+  --green: #256b47;
+  --cyan: #0e7d8e;
+  --t1: #0f7f93;  --t2: #2565a8;  --t3: #5560c0;  --t4: #7d55c0;
+  --shadow: 0 12px 32px rgba(24,28,33,.10);
+}
+
+/* ── 基础 ──────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.55 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace; }
+b { font-weight: 600; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+button { font: inherit; color: inherit; }
+
+/* ── demo 外框（不属于面板本身） ─────────────────────────────────────── */
+.wrap { max-width: 1120px; margin: 0 auto; padding: 24px 20px 40px; }
+.demo-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.demo-bar .demo-title { font-size: 15px; font-weight: 600; }
+.demo-bar .demo-sub { font-size: 12px; color: var(--ink-3); }
+.demo-bar .spacer { flex: 1; }
+.ctl-label { font-size: 12px; color: var(--ink-3); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel); }
+.seg button { padding: 4px 12px; font-size: 12px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); font-weight: 600; }
+.footnote { margin: 12px 4px 0; font-size: 12px; color: var(--ink-3); }
+
+/* ── 面板 ──────────────────────────────────────────────────────────── */
+.frame { position: relative; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); }
+.panel { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+/* 头部：标题 / 会话号 / 操作 */
+.head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.head .title { font-size: 15px; font-weight: 600; }
+.head .session { font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.statline { font-size: 11.5px; color: var(--ink-3); display: flex; gap: 14px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.statline b { color: var(--ink-2); font-weight: 600; }
+
+/* 按钮 */
+.btn {
+  border: 1px solid var(--line); border-radius: 7px; background: transparent;
+  padding: 5px 12px; font-size: 12.5px; cursor: pointer; color: var(--ink-2);
+}
+.btn:hover:not(:disabled) { background: var(--panel-2); color: var(--ink); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: .38; cursor: not-allowed; }
+.btn.primary {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+}
+.btn.primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent); }
+
+/* ── 卡片 ──────────────────────────────────────────────────────────── */
+.card { border: 1px solid var(--line-2); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.card-title { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-title .count { color: var(--ink-3); font-weight: 400; font-size: 11.5px; }
+.card-title .spacer { flex: 1; }
+
+/* ── 压力计 ────────────────────────────────────────────────────────── */
+.readout { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+.readout b { font-weight: 600; color: var(--ink); font-size: 13px; }
+.badge { font-size: 11.5px; font-weight: 600; padding: 1px 9px; border-radius: 999px; border: 1px solid transparent; }
+.badge.calm { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.badge.hot  { color: var(--verm); border-color: color-mix(in srgb, var(--verm) 40%, transparent); background: color-mix(in srgb, var(--verm) 10%, transparent); }
+.badge.ok   { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); background: color-mix(in srgb, var(--green) 10%, transparent); }
+.readout .fixed-note { color: var(--ink-3); }
+
+.gauge { position: relative; height: 20px; border-radius: 6px; background: var(--panel-2); overflow: hidden; border: 1px solid var(--line-2); }
+.seg-fixed, .seg-content, .seg-over, .seg-headroom, .seg-dead { position: absolute; top: 0; bottom: 0; }
+.seg-fixed {
+  width: .87%; left: 0; background: var(--fill-fixed);
+  background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.07) 0 4px, transparent 4px 10px);
+}
+.seg-content {
+  background: var(--fill-content);
+  /* Apple 式材质感：纯色 + 顶部 1px 内嵌亮线，替代大渐变 */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.22);
+  left: .87%;
+  transition: width .5s cubic-bezier(.2,.7,.2,1), left .5s cubic-bezier(.2,.7,.2,1);
+}
+.seg-over {
+  background: var(--fill-over);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.22);
+  transition: width .5s cubic-bezier(.2,.7,.2,1);
+}
+.seg-headroom {
+  background-color: color-mix(in srgb, var(--accent) 4%, transparent);
+  background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 13%, transparent) 0 3px, transparent 3px 8px);
+  transition: left .5s cubic-bezier(.2,.7,.2,1), width .5s cubic-bezier(.2,.7,.2,1);
+}
+.seg-dead { right: 0; background: repeating-linear-gradient(90deg, transparent 0 26px, var(--line-2) 26px 27px); }
+.tick { position: absolute; top: -3px; bottom: -3px; width: 0; }
+.tick-trigger { width: 2px; background: var(--tick-c); box-shadow: 0 0 0 1px color-mix(in srgb, var(--tick-c) 18%, transparent); }
+.tick-target { width: 2px; background: repeating-linear-gradient(180deg, var(--green) 0 5px, transparent 5px 10px); }
+
+.axis { position: relative; height: 18px; font-size: 11px; color: var(--ink-2); }
+.axis span { position: absolute; top: 2px; white-space: nowrap; }
+.axis .ax-0 { left: 0; }
+.axis .ax-window { right: 0; color: var(--ink-3); }
+.axis .ax-mid { transform: translateX(-50%); }
+.axis .ax-mid::before { content: ""; position: absolute; top: -7px; left: 50%; width: 1px; height: 4px; background: var(--ink-3); }
+.axis .mono { font-size: 10.5px; }
+
+/* ── 组装 & 判定读数 ────────────────────────────────────────────────── */
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chip {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 11px; padding: 1px 8px; border-radius: 5px; border: 1px solid transparent; white-space: nowrap;
+}
+.chip.t1 { color: var(--t1); background: color-mix(in srgb, var(--t1) 12%, transparent); border-color: color-mix(in srgb, var(--t1) 32%, transparent); }
+.chip.t2 { color: var(--t2); background: color-mix(in srgb, var(--t2) 12%, transparent); border-color: color-mix(in srgb, var(--t2) 32%, transparent); }
+.chip.t3 { color: var(--t3); background: color-mix(in srgb, var(--t3) 12%, transparent); border-color: color-mix(in srgb, var(--t3) 32%, transparent); }
+.chip.t4 { color: var(--t4); background: color-mix(in srgb, var(--t4) 12%, transparent); border-color: color-mix(in srgb, var(--t4) 32%, transparent); }
+.chip.raw { color: var(--ink-2); background: var(--panel-2); border-color: var(--line); }
+
+.verdicts { display: flex; flex-direction: column; }
+.verdict { display: grid; grid-template-columns: 96px 1fr auto; gap: 10px; align-items: baseline; padding: 7px 0; font-size: 12.5px; }
+.verdict + .verdict { border-top: 1px dashed var(--line-2); }
+.verdict .v-label { color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.verdict .v-label svg { flex: none; }
+.verdict .v-text { color: var(--ink-2); }
+.verdict .v-meta { font-size: 11px; color: var(--ink-3); }
+.verdict.hot .v-text { color: var(--verm); }
+.verdict.ok .v-text { color: var(--green); }
+
+/* ── 块账本 ─────────────────────────────────────────────────────────── */
+.viewseg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.viewseg button { border: 0; background: transparent; padding: 3px 10px; font-size: 11.5px; color: var(--ink-2); cursor: pointer; }
+.viewseg button + button { border-left: 1px solid var(--line); }
+.viewseg button[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); font-weight: 600; }
+
+.tbl-wrap { max-height: 44vh; overflow: auto; border-radius: 8px; border: 1px solid var(--line-2); }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th {
+  position: sticky; top: 0; z-index: 1; background: var(--panel);
+  text-align: left; font-weight: 600; font-size: 11.5px; color: var(--ink-3);
+  padding: 6px 8px; border-bottom: 1px solid var(--line);
+}
+tbody td { padding: 5px 8px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+tbody tr.row { cursor: pointer; }
+tbody tr.row:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+tbody tr.row.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+tbody tr.row.consumed td:not(:first-child) { opacity: .5; }
+tbody tr.row.consumed td:first-child { opacity: .85; }
+tbody tr.row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+td.idcell { white-space: nowrap; }
+td.idcell .chev { display: inline-block; width: 0; height: 0; margin-left: 6px; border: 3.5px solid transparent; border-top-color: var(--ink-3); border-bottom-width: 0; vertical-align: 1px; transition: transform .15s; }
+tr.open .idcell .chev { transform: rotate(90deg); }
+td.num { text-align: right; white-space: nowrap; }
+td.num .arrow { color: var(--ink-3); padding: 0 2px; }
+td.num .to { color: var(--green); }
+.status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--ink-2); }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.committed { background: var(--green); }
+.dot.dormant { background: transparent; border: 1.5px solid var(--cyan); }
+.dot.consumed { background: var(--ink-3); }
+.dot.inflight { background: var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+tr.summary-row td { padding: 0 8px 8px; }
+.blocksum {
+  font-size: 12px; color: var(--ink-2); background: var(--panel-2);
+  border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; line-height: 1.6;
+}
+.blocksum.t1 { border-left: 2px solid var(--t1); } .blocksum.t2 { border-left: 2px solid var(--t2); }
+.blocksum.t3 { border-left: 2px solid var(--t3); } .blocksum.t4 { border-left: 2px solid var(--t4); }
+
+tr.ghost td { opacity: .75; font-style: italic; }
+tr.ghost { background-image: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--cyan) 7%, transparent) 50%, transparent 70%); background-size: 220% 100%; animation: shimmer 2.4s linear infinite; }
+@keyframes shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+
+/* 塔结构 */
+.tree { font-size: 12px; max-height: 40vh; overflow: auto; }
+.tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul ul { margin-left: 15px; padding-left: 15px; border-left: 1px solid var(--line); }
+.tree li { padding: 3px 0; }
+.tree .node { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tree .node code { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 11.5px; }
+.tree .node .meta { color: var(--ink-3); font-size: 11.5px; }
+.tree li.child::before { content: ""; display: inline-block; width: 8px; height: 1px; background: var(--line); vertical-align: 4px; margin-left: -15px; }
+.tree .node.consumed { opacity: .5; }
+
+/* ── toast ─────────────────────────────────────────────────────────── */
+.toasts { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 5; max-width: 340px; }
+.toast {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 12px; font-size: 12.5px; color: var(--ink);
+  box-shadow: 0 8px 24px rgba(0,0,0,.28); animation: rise .18s ease-out;
+}
+.toast .t-tag { color: var(--cyan); font-weight: 600; margin-right: 6px; }
+@keyframes rise { from { transform: translateY(6px); opacity: 0; } }
+
+/* ── 动效克制与窄屏 ──────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .seg-content, .seg-over, .seg-headroom { transition: none; }
+  .dot.inflight, tr.ghost { animation: none; }
+  .toast { animation: none; }
+}
+@media (max-width: 760px) {
+  .head { gap: 8px; }
+  .head .session { max-width: 140px; }
+  .verdict { grid-template-columns: 84px 1fr; }
+  .verdict .v-meta { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="demo-bar">
+    <span class="demo-title">Tower 面板重设计 demo</span>
+    <span class="demo-sub">dsh-compaction-tower · 数据为演示快照，字段名对齐 GET /tower/state</span>
+    <span class="spacer"></span>
+    <span class="ctl-label">主题</span>
+    <div class="seg" id="theme-seg">
+      <button data-v="dark" aria-pressed="true">深色</button>
+      <button data-v="light" aria-pressed="false">浅色</button>
+    </div>
+    <span class="ctl-label">内容配色</span>
+    <div class="seg" id="mercury-seg">
+      <button data-v="cool" aria-pressed="true">钢青</button>
+      <button data-v="warm" aria-pressed="false">琥珀</button>
+    </div>
+    <span class="ctl-label">演示状态</span>
+    <div class="seg" id="state-seg">
+      <button data-v="under" aria-pressed="true">未越线</button>
+      <button data-v="over" aria-pressed="false">已越线</button>
+      <button data-v="after" aria-pressed="false">刚提交</button>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="panel">
+
+      <div class="head">
+        <span class="title">压缩记录</span>
+        <span class="session mono" id="session-id"></span>
+        <span style="flex:1"></span>
+        <button class="btn" id="act-distill">立即蒸馏</button>
+        <button class="btn primary" id="act-commit">立即提交</button>
+        <button class="btn" id="act-merge" disabled title="勾选两个同层且已进入上下文的块">合并选中</button>
+        <button class="btn" id="act-config">设置</button>
+      </div>
+      <div class="statline" id="statline"></div>
+
+      <div class="card">
+        <div class="card-title">上下文占用</div>
+
+        <div class="readout">
+          <span class="badge calm" id="gauge-badge">未越线</span>
+          <span>内容 <b class="mono" id="ro-content">—</b> / 可用 <b class="mono">991.3K</b></span>
+          <span class="fixed-note">固定开销（system + 工具 schema）8.7K</span>
+        </div>
+
+        <div class="gauge">
+          <div class="seg-fixed"></div>
+          <div class="seg-content" id="seg-content"></div>
+          <div class="seg-over" id="seg-over" style="display:none"></div>
+          <div class="seg-headroom" id="seg-headroom"></div>
+          <div class="seg-dead" id="seg-dead"></div>
+          <div class="tick tick-trigger" id="tick-trigger"></div>
+          <div class="tick tick-target" id="tick-target"></div>
+        </div>
+        <div class="axis">
+          <span class="ax-0 mono">0</span>
+          <span class="ax-mid" id="ax-target">目标线 <span class="mono">148.7K</span></span>
+          <span class="ax-mid" id="ax-trigger">触发线 <span class="mono">446.1K</span></span>
+          <span class="ax-window">窗口 <span class="mono">1.0M</span></span>
+        </div>
+
+        <div class="verdicts">
+          <div class="verdict" id="v-assembly">
+            <span class="v-label">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1.5 14.5 5 8 8.5 1.5 5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2.5 8.4 8 11.4l5.5-3" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+              当前组装
+            </span>
+            <span class="chips" id="assembly"></span>
+            <span class="v-meta"></span>
+          </div>
+          <div class="verdict" id="v-pressure">
+            <span class="v-label">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M1.5 13.5h13M3 10.5V7m3.5 3.5V4.5M10 10.5V6m3 4.5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              上次判定
+            </span>
+            <span class="v-text" id="pressure-text"></span>
+            <span class="v-meta mono" id="pressure-meta"></span>
+          </div>
+          <div class="verdict" id="v-observation">
+            <span class="v-label">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M1.6 8S3.8 3.8 8 3.8 14.4 8 14.4 8 12.2 12.2 8 12.2 1.6 8 1.6 8Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+              上次观察
+            </span>
+            <span class="v-text" id="observation-text"></span>
+            <span class="v-meta"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>块<span id="block-count"></span></span>
+          <span class="count" id="status-counts"></span>
+          <span class="spacer"></span>
+          <div class="viewseg" id="view-seg">
+            <button data-v="list" aria-pressed="true">列表</button>
+            <button data-v="tree" aria-pressed="false">塔结构</button>
+          </div>
+        </div>
+        <div class="tbl-wrap" id="list-view"></div>
+        <div class="tree" id="tree-view" hidden></div>
+      </div>
+
+    </div>
+    <div class="toasts" id="toasts"></div>
+  </div>
+
+  <p class="footnote">
+    demo 说明：三档状态对应压缩循环的三个时刻，占用条公式照搬 lib/client.js 的 UsageBar；
+    立即蒸馏 / 立即提交在真实实现中只排队，真正的压缩由回合内的引擎发起；
+    层色阶（T1 浅青 → T4 深紫）表示「越老越粗」，绿 = 已在上下文，朱红 = 越线；
+    内容配色可切：钢青 = 内容平静、琥珀色触发线是「换班哨」、越线段才染朱红；琥珀 = 蒸馏加热的水银隐喻。
+  </p>
+</div>
+
+<script>
+/* ═══ 工具：数字格式，照搬 client.js 的 fmt ═════════════════════════ */
+function fmt(tokens) {
+  if (typeof tokens !== 'number' || !Number.isFinite(tokens)) return '—';
+  if (tokens < 1000) return String(Math.round(tokens));
+  if (tokens < 1000000) return `${(tokens / 1000).toFixed(1)}K`;
+  return `${(tokens / 1000000).toFixed(1)}M`;
+}
+const $ = (id) => document.getElementById(id);
+
+/* ═══ 块摘要正文（演示文案） ═════════════════════════════════════════ */
+const SUMMARIES = [
+  '搭起测试脚手架：确认七个测试各自以 node test/<name>.mjs 运行、最后一行打印「✅ N 项全部通过」；smoke 纯逻辑覆盖选段与提交计划，patch 用假 engine/agent/session 走完压力→提交→摘要查表。约定不改宿主、只换三个原型方法。',
+  '排查两种 token 口径：判定的「内容」来自 provider 的 usage（真实），tokenMeter 的 nodes[].tokens 是字符数÷4 的估算，中文被低估三成。统一口径靠 calibration() 的事实修正系数乘到所有估算值上，realTokensOf() 用两次请求的 prompt 差直接测出块的真实大小。',
+  '厘清提交闸门：宿主报错文案写着 step，实际校验的是「工具调用与结果不跨切点」；按 step 卡会让合并块（checkpoint 节点落在 step 之外）永远提交不了，改为按配对平衡判定。',
+  '实现观察者按缺口补货：目标库存 = 离目标线的距离 + 一个单位 + 误差垫，逐层抵扣已有库存得到 need；补货量按缺口算，不是每层备固定份数。只蒸保护区之外的原文，与提交时的 headRun 同口径。',
+  '约定判定与面板同一函数出数：否则面板会出现自相矛盾的两行。client.js 加载态与数据态之间钩子数量必须一致，否则 React 抛 #310 整块白屏，test/client.mjs 守着这条线。',
+  '打包安装四步：升版本号 → pnpm pack 出 tgz → 宿主插件管理装绝对路径的 tgz → 重启应用。装进 profile 的始终是 tgz，改源码不生效。',
+];
+
+/* ═══ 块账本（字段名对齐 /tower/state 的 blocks[]） ═══════════════════ */
+function mkBlock(blockId, tier, status, covers, covered, summary, parent) {
+  return {
+    blockId, tier, status, nCovers: covers, coveredTokens: covered, summaryTokens: summary,
+    coveredLabel: fmt(covered), summaryLabel: fmt(summary), childBlockIds: parent ?? [],
+    summary: SUMMARIES[(Number(blockId.slice(1)) - 1) % SUMMARIES.length],
+  };
+}
+// 被并入上层的 14 块（家谱：b00015 T4 ← 两个 T3 ← 各两个 T2 ← 各两个 T1；b00018 T2 ← 两个 T1）
+const BASE_BLOCKS = [
+  mkBlock('b00001', 1, 'consumed', 6, 49300, 4600),
+  mkBlock('b00002', 1, 'consumed', 5, 49600, 4400),
+  mkBlock('b00003', 1, 'consumed', 7, 48800, 4500),
+  mkBlock('b00004', 1, 'consumed', 8, 47500, 4800),
+  mkBlock('b00005', 2, 'consumed', 2, 9000, 4700, ['b00001', 'b00002']),
+  mkBlock('b00006', 2, 'consumed', 2, 9300, 4900, ['b00003', 'b00004']),
+  mkBlock('b00007', 3, 'consumed', 2, 9600, 5000, ['b00005', 'b00006']),
+  mkBlock('b00008', 1, 'consumed', 6, 50100, 4300),
+  mkBlock('b00009', 1, 'consumed', 7, 48400, 4600),
+  mkBlock('b00010', 1, 'consumed', 6, 49200, 4400),
+  mkBlock('b00011', 1, 'consumed', 7, 47800, 4700),
+  mkBlock('b00012', 2, 'consumed', 2, 8900, 4800, ['b00008', 'b00009']),
+  mkBlock('b00013', 2, 'consumed', 2, 9100, 4600, ['b00010', 'b00011']),
+  mkBlock('b00014', 3, 'consumed', 2, 9400, 5100, ['b00012', 'b00013']),
+  mkBlock('b00015', 4, 'committed', 2, 10100, 5200, ['b00007', 'b00014']),
+  mkBlock('b00016', 1, 'consumed', 7, 49700, 4500),
+  mkBlock('b00017', 1, 'consumed', 6, 48900, 4600),
+  mkBlock('b00018', 2, 'committed', 2, 9100, 4800, ['b00016', 'b00017']),
+  mkBlock('b00019', 1, 'committed', 7, 49400, 4700),
+  mkBlock('b00020', 1, 'committed', 6, 48600, 4500),
+  mkBlock('b00021', 1, 'committed', 8, 47900, 4400),
+  mkBlock('b00022', 1, 'dormant', 7, 49300, 4600),
+  mkBlock('b00023', 1, 'dormant', 6, 48800, 4400),
+  mkBlock('b00024', 1, 'dormant', 7, 49600, 4700),
+  mkBlock('b00025', 1, 'dormant', 6, 47200, 4500),
+  mkBlock('b00026', 1, 'dormant', 7, 50100, 4800),
+  mkBlock('b00027', 1, 'dormant', 8, 48400, 4300),
+];
+BASE_BLOCKS[0].childBlockIds = [];
+// 正在总结的块（inflight[]，块号派发时就定了）
+const INFLIGHT = [{ blockId: 'b00028', tier: 1, count: 7, coveredLabel: '49.6K' }];
+
+/* ═══ 三档演示快照（字段名对齐 /tower/state） ═══════════════════════ */
+const WINDOW = 1000000, FIXED = 8700, USABLE = 991300, TRIGGER = 446085, TARGET = 148695;
+const SNAPSHOTS = {
+  under: {
+    budget: { contextWindow: WINDOW, fixed: { total: FIXED }, content: 380412, usable: USABLE, triggerTokens: TRIGGER, targetTokens: TARGET },
+    pressure: { kind: 'below-trigger', content: 380412, trigger: TRIGGER, calls: 42 },
+    observation: { kind: 'launched', plan: [{ level: 0, count: 2 }], unit: 49565, target: 355300, need: 88100 },
+    composition: { tiers: [{ tier: 4, count: 1 }, { tier: 2, count: 1 }, { tier: 1, count: 3 }], raw: 48 },
+    stats: { distilled: 27, committed: 21, served: 7, failures: 0 },
+    statusOf: () => ({}),
+  },
+  over: {
+    budget: { contextWindow: WINDOW, fixed: { total: FIXED }, content: 452300, usable: USABLE, triggerTokens: TRIGGER, targetTokens: TARGET },
+    pressure: { kind: 'commit', blockIds: ['b00022', 'b00023', 'b00024', 'b00025', 'b00026', 'b00027'], blockCount: 6, projected: 186200 },
+    observation: { kind: 'stocked' },
+    composition: { tiers: [{ tier: 4, count: 1 }, { tier: 2, count: 1 }, { tier: 1, count: 3 }], raw: 58 },
+    stats: { distilled: 27, committed: 21, served: 7, failures: 0 },
+    statusOf: () => ({}),
+  },
+  after: {
+    budget: { contextWindow: WINDOW, fixed: { total: FIXED }, content: 186200, usable: USABLE, triggerTokens: TRIGGER, targetTokens: TARGET },
+    pressure: { kind: 'commit', outcome: { planned: 6, succeeded: 6, error: null }, projected: 186200, calls: 43 },
+    observation: { kind: 'launched', plan: [{ level: 0, count: 2 }], unit: 49565, target: 355300, need: 88100 },
+    composition: { tiers: [{ tier: 4, count: 1 }, { tier: 2, count: 1 }, { tier: 1, count: 9 }], raw: 18 },
+    stats: { distilled: 27, committed: 27, served: 7, failures: 0 },
+    // 六块库存已提交：待提交 → 已进入上下文
+    statusOf: () => Object.fromEntries(['b00022', 'b00023', 'b00024', 'b00025', 'b00026', 'b00027'].map((id) => [id, 'committed'])),
+  },
+};
+
+/* ═══ 判定文案（对齐 client.js 的 describePressure / describeObservation） ═══ */
+function pressureText(p) {
+  switch (p.kind) {
+    case 'below-trigger': return `未到触发线（内容 ${fmt(p.content)} / ${fmt(p.trigger)}）`;
+    case 'commit': {
+      if (p.outcome) {
+        return `提交 ${p.outcome.succeeded}/${p.outcome.planned} 块${p.outcome.error ? `，中途失败：${p.outcome.error}` : ''} → 落回 ${fmt(p.projected)}`;
+      }
+      return `计划提交 ${p.blockCount} 块（${p.blockIds.join(' ')}）→ ${fmt(p.projected)}`;
+    }
+    default: return p.kind;
+  }
+}
+function observationText(o) {
+  switch (o.kind) {
+    case 'launched': {
+      const jobs = (o.plan ?? []).map((j) => `T${j.level + 1}×${j.count}`).join(' ');
+      return `发起 ${jobs}（单位 ${fmt(o.unit)} tok，目标 ${fmt(o.target)} 还差 ${fmt(o.need)}）`;
+    }
+    case 'stocked': return '库存已够，先不蒸（防浪费）';
+    default: return o.kind;
+  }
+}
+
+/* ═══ 渲染 ════════════════════════════════════════════════════════════ */
+let current = 'under';
+let currentView = 'list';
+const selected = new Set();
+let openBlock = null;
+
+function blocksOfState(snap) {
+  const override = snap.statusOf();
+  return BASE_BLOCKS.map((b) => ({ ...b, status: override[b.blockId] ?? b.status }));
+}
+
+function renderGauge(snap) {
+  const b = snap.budget;
+  const fixedPct = (b.fixed.total / b.contextWindow) * 100;
+  const percent = Math.min(100, ((b.fixed.total + b.content) / b.contextWindow) * 100);
+  const triggerPct = ((b.fixed.total + b.triggerTokens) / b.contextWindow) * 100;
+  const targetPct = ((b.fixed.total + b.targetTokens) / b.contextWindow) * 100;
+  const over = percent > triggerPct;
+  const solid = over ? Math.max(0, triggerPct - fixedPct) : Math.max(0, percent - fixedPct);
+  const band = over ? 0 : Math.max(0, triggerPct - percent);
+
+  $('ro-content').textContent = fmt(b.content);
+  $('seg-content').style.width = `${solid}%`;
+  $('seg-content').style.left = `${fixedPct}%`;
+  $('seg-headroom').style.display = band > 0 ? '' : 'none';
+  $('seg-headroom').style.left = `${Math.min(percent, triggerPct)}%`;
+  $('seg-headroom').style.width = `${band}%`;
+  $('seg-over').style.display = over ? '' : 'none';
+  if (over) {
+    $('seg-over').style.left = `${triggerPct}%`;
+    $('seg-over').style.width = `${percent - triggerPct}%`;
+  }
+  $('seg-dead').style.left = `${over ? percent : triggerPct}%`;
+  $('tick-trigger').style.left = `${triggerPct}%`;
+  $('tick-target').style.left = `${targetPct}%`;
+  $('ax-target').style.left = `${targetPct}%`;
+  $('ax-trigger').style.left = `${triggerPct}%`;
+
+  const badge = $('gauge-badge');
+  const verdict = $('v-pressure');
+  verdict.classList.remove('hot', 'ok');
+  if (over) {
+    badge.textContent = `已越过触发线 ${fmt(b.content - b.triggerTokens)}`;
+    badge.className = 'badge hot';
+  } else if (current === 'after') {
+    badge.textContent = '刚提交 · 已落回区间内';
+    badge.className = 'badge ok';
+    verdict.classList.add('ok');
+  } else {
+    badge.textContent = `未越线 · 余量 ${fmt(b.triggerTokens - b.content)}`;
+    badge.className = 'badge calm';
+  }
+}
+
+function renderVerdicts(snap) {
+  const p = snap.pressure;
+  $('pressure-text').textContent = pressureText(p);
+  $('pressure-meta').textContent = p.calls ? `第 ${p.calls} 次判定` : '';
+  $('v-pressure').classList.toggle('hot', p.kind === 'commit' && !p.outcome);
+  $('observation-text').textContent = observationText(snap.observation);
+}
+
+function renderAssembly(snap) {
+  const box = $('assembly');
+  box.innerHTML = '';
+  for (const t of snap.composition.tiers) {
+    const chip = document.createElement('span');
+    chip.className = `chip t${Math.min(t.tier, 4)}`;
+    chip.textContent = `T${t.tier} ×${t.count}`;
+    box.appendChild(chip);
+  }
+  if (snap.composition.raw > 0) {
+    const raw = document.createElement('span');
+    raw.className = 'chip raw';
+    raw.textContent = `原文 ×${snap.composition.raw}`;
+    box.appendChild(raw);
+  }
+}
+
+function renderStats(snap) {
+  $('session-id').textContent = 'session-3a536571-e951-4ab4-99a4-f43db64a718e';
+  const s = snap.stats;
+  $('statline').innerHTML =
+    `<span>蒸馏 <b>${s.distilled}</b></span>` +
+    `<span>提交 <b>${s.committed}</b></span>` +
+    `<span>摘要查表 <b>${s.served}</b></span>` +
+    `<span>失败 <b>${s.failures}</b></span>`;
+}
+
+const STATUS_LABEL = { committed: '已进入上下文', consumed: '已并入上层', dormant: '待提交' };
+
+function renderCounts(blocks) {
+  $('block-count').textContent = `（${blocks.length}）`;
+  const n = { committed: 0, consumed: 0, dormant: 0 };
+  for (const b of blocks) n[b.status] += 1;
+  $('status-counts').textContent = `已进入 ${n.committed} · 已并入 ${n.consumed} · 待提交 ${n.dormant} · 总结中 ${INFLIGHT.length}`;
+}
+
+function renderList(blocks) {
+  const wrap = $('list-view');
+  const rows = [];
+  for (const b of blocks) {
+    rows.push(
+      `<tr class="row ${b.status}${selected.has(b.blockId) ? ' selected' : ''}${openBlock === b.blockId ? ' open' : ''}" data-id="${b.blockId}">` +
+      `<td><input type="checkbox" data-id="${b.blockId}" ${selected.has(b.blockId) ? 'checked' : ''} aria-label="选择 ${b.blockId}"></td>` +
+      `<td class="idcell"><code class="mono">${b.blockId}</code><span class="chev"></span></td>` +
+      `<td><span class="chip t${Math.min(b.tier, 4)}">T${b.tier}</span></td>` +
+      `<td>${b.nCovers} 条</td>` +
+      `<td class="num mono">${b.coveredLabel}<span class="arrow">→</span><span class="to">${b.summaryLabel}</span></td>` +
+      `<td><span class="status"><span class="dot ${b.status}"></span>${STATUS_LABEL[b.status]}</span></td>` +
+      `</tr>` +
+      (openBlock === b.blockId
+        ? `<tr class="summary-row"><td colspan="6"><div class="blocksum t${Math.min(b.tier, 4)}">${b.summary}</div></td></tr>`
+        : ''),
+    );
+  }
+  for (const g of INFLIGHT) {
+    rows.push(
+      `<tr class="row ghost">` +
+      `<td>·</td>` +
+      `<td class="idcell"><code class="mono">${g.blockId}</code></td>` +
+      `<td><span class="chip t${Math.min(g.tier, 4)}">T${g.tier}</span></td>` +
+      `<td>${g.count} 条</td>` +
+      `<td class="num mono">${g.coveredLabel}<span class="arrow">→</span><span class="to" style="color:var(--cyan)">总结中…</span></td>` +
+      `<td><span class="status"><span class="dot inflight"></span>总结中</span></td>` +
+      `</tr>`,
+    );
+  }
+  wrap.innerHTML = `<table><thead><tr><th style="width:26px"></th><th>块号</th><th>层</th><th>覆盖</th><th class="num" style="text-align:right">原 → 摘要</th><th>状态</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+
+function renderTree(blocks) {
+  const byId = new Map(blocks.map((b) => [b.blockId, b]));
+  const childOf = new Set();
+  for (const b of blocks) for (const id of b.childBlockIds) childOf.add(id);
+  const roots = blocks.filter((b) => !childOf.has(b.blockId));
+  const node = (b) => {
+    const kids = b.childBlockIds.map((id) => byId.get(id)).filter(Boolean);
+    return `<li class="${childOf.has(b.blockId) ? 'child' : ''}">` +
+      `<span class="node ${b.status}"><span class="chip t${Math.min(b.tier, 4)}">T${b.tier}</span><code>${b.blockId}</code>` +
+      `<span class="meta">${b.nCovers} 条 · ${b.coveredLabel} → ${b.summaryLabel}</span>` +
+      `<span class="dot ${b.status}" style="align-self:center"></span></span>` +
+      (kids.length ? `<ul>${kids.map(node).join('')}</ul>` : '') +
+      `</li>`;
+  };
+  $('tree-view').innerHTML = `<ul>${roots.map(node).join('')}</ul>`;
+}
+
+function updateMergeButton(blocks) {
+  const chosen = blocks.filter((b) => selected.has(b.blockId));
+  const can = chosen.length >= 2
+    && new Set(chosen.map((b) => b.tier)).size === 1
+    && chosen.every((b) => b.status === 'committed');
+  const btn = $('act-merge');
+  btn.disabled = !can;
+  btn.title = can ? '' : '勾选两个同层且已进入上下文的块';
+}
+
+function renderAll() {
+  const snap = SNAPSHOTS[current];
+  const blocks = blocksOfState(snap);
+  renderGauge(snap);
+  renderVerdicts(snap);
+  renderAssembly(snap);
+  renderStats(snap);
+  renderCounts(blocks);
+  renderList(blocks);
+  renderTree(blocks);
+  updateMergeButton(blocks);
+}
+
+/* ═══ 交互 ════════════════════════════════════════════════════════════ */
+$('list-view').addEventListener('click', (e) => {
+  const box = e.target.closest('input[type="checkbox"]');
+  if (box) {
+    e.stopPropagation();
+    if (box.checked) selected.add(box.dataset.id); else selected.delete(box.dataset.id);
+    renderAll();
+    return;
+  }
+  const row = e.target.closest('tr.row');
+  if (!row || row.classList.contains('ghost') || !row.dataset.id) return;
+  openBlock = openBlock === row.dataset.id ? null : row.dataset.id;
+  renderAll();
+});
+
+$('act-distill').addEventListener('click', () => toast('已排队', '观察者将在下个回合结束时跑一次蒸馏'));
+$('act-commit').addEventListener('click', () => toast('已排队', '引擎下次来问时按目标一次提交完（空闲时宿主会拒绝，所以要等回合）'));
+$('act-merge').addEventListener('click', () => {
+  const blocks = blocksOfState(SNAPSHOTS[current]);
+  const chosen = blocks.filter((b) => selected.has(b.blockId));
+  toast('合并已写入账本', `${chosen.map((b) => b.blockId).join(' + ')} → 新的 T${chosen[0].tier + 1} 块（不需要等回合）`);
+});
+$('act-config').addEventListener('click', () => toast('demo', '配置页复用同一套视觉令牌，暂不在本 demo 范围'));
+
+function toast(tag, text) {
+  const box = $('toasts');
+  if (box.children.length >= 3) box.firstChild.remove();
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<span class="t-tag">${tag}</span>${text}`;
+  box.appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+/* 视图切换：列表 / 塔结构 */
+$('view-seg').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  currentView = btn.dataset.v;
+  for (const b of $('view-seg').children) b.setAttribute('aria-pressed', String(b.dataset.v === currentView));
+  $('list-view').hidden = currentView !== 'list';
+  $('tree-view').hidden = currentView !== 'tree';
+});
+
+/* demo 控制：主题 / 状态 */
+function bindSeg(id, apply) {
+  $(id).addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    for (const b of $(id).children) b.setAttribute('aria-pressed', String(b === btn));
+    apply(btn.dataset.v);
+  });
+}
+bindSeg('theme-seg', (v) => { document.documentElement.dataset.theme = v; });
+bindSeg('mercury-seg', (v) => { document.documentElement.dataset.mercury = v; });
+bindSeg('state-seg', (v) => { current = v; selected.clear(); openBlock = null; renderAll(); });
+
+/* URL 参数（便于截图） */
+const params = new URLSearchParams(location.search);
+if (params.get('theme') === 'light' || params.get('theme') === 'dark') {
+  document.documentElement.dataset.theme = params.get('theme');
+  for (const b of $('theme-seg').children) b.setAttribute('aria-pressed', String(b.dataset.v === params.get('theme')));
+}
+if (params.get('mercury') === 'warm' || params.get('mercury') === 'cool') {
+  document.documentElement.dataset.mercury = params.get('mercury');
+  for (const b of $('mercury-seg').children) b.setAttribute('aria-pressed', String(b.dataset.v === params.get('mercury')));
+}
+if (['under', 'over', 'after'].includes(params.get('state'))) {
+  current = params.get('state');
+  for (const b of $('state-seg').children) b.setAttribute('aria-pressed', String(b.dataset.v === current));
+}
+if (params.get('view') === 'tree') {
+  currentView = 'tree';
+  for (const b of $('view-seg').children) b.setAttribute('aria-pressed', String(b.dataset.v === currentView));
+  $('list-view').hidden = true;
+  $('tree-view').hidden = false;
+}
+
+renderAll();
+</script>
+</body>
+</html>

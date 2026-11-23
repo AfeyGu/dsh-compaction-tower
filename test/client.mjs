@@ -190,8 +190,12 @@ try {
     dead.map((node) => node.props.style?.left).join(','));
   check('图例给出触发线数字', texts(loaded).some((text) => text === '触发线 450.0K（内容）'), JSON.stringify(texts(loaded)));
   check('当前组装按层计数 + 原文条数',
-    texts(loaded).some((text) => text === '当前组装：T2 1 块 + T1 3 块 + 原文 42 条'), JSON.stringify(texts(loaded)));
-  check('显示上次观察（为什么没蒸）', texts(loaded).some((text) => text.includes('没有可蒸材料')),
+    texts(loaded).some((text) => text === '当前组装')
+      && texts(loaded).some((text) => text === 'T2 ×1')
+      && texts(loaded).some((text) => text === 'T1 ×3')
+      && texts(loaded).some((text) => text === '原文 ×42'),
+    JSON.stringify(texts(loaded)));
+  check('显示上次观察（为什么没总结）', texts(loaded).some((text) => text.includes('没有可总结的材料')),
     JSON.stringify(texts(loaded).filter((text) => text.includes('上次观察'))));
   check('正在总结的块显示为虚行', texts(loaded).some((text) => text === '总结中'), JSON.stringify(texts(loaded).filter((text) => text.includes('总结'))));
   check('显示上次判定（为什么没压）', texts(loaded).some((text) => text.includes('没有可提交的块')),
@@ -211,6 +215,10 @@ try {
   check('灰段从当前开始', overNodes('tw-bar-dead')[0]?.props.style?.left === '50%',
     overNodes('tw-bar-dead')[0]?.props.style?.left);
   check('越线时图例给出提示', texts(overTree).some((text) => text.includes('已越过触发线')));
+  check('越线徽章给出越线量', texts(overTree).some((text) => text.startsWith('已越过触发线')),
+    JSON.stringify(texts(overTree).filter((text) => text.includes('触发线'))));
+  check('触发线刻度画在触发位置', overNodes('tw-tick-trigger')[0]?.props.style?.left === '45%',
+    String(overNodes('tw-tick-trigger')[0]?.props.style?.left));
 
   // 固定开销（system + 工具 schema）：最前面一截黑色，实心从它右边起。
   slotsOf(api.TowerView)[0].setter({
@@ -264,6 +272,24 @@ try {
   check('视图切换不抛错', false, error.message);
 }
 
+// 第四帧：块列表 ⟷ 塔结构（同一份数据的两个镜头，视图钩子排在 showConfig 之后）
+try {
+  const setView = slotsOf(api.TowerView)[6]?.setter;
+  check('视图切换握着 setter', typeof setView === 'function');
+  setView('tree');
+  const treeFrame = render(createElement(api.TowerView, { sessionId: 'session-test' }));
+  check('塔结构视图渲染出树', hosts(treeFrame).some((node) => typeof node.props.className === 'string'
+    && node.props.className.includes('tw-tree')));
+  check('塔结构视图收起列表', !hosts(treeFrame).some((node) => typeof node.props.className === 'string'
+    && node.props.className.includes('tw-table-wrap')));
+  setView('list');
+  const listFrame = render(createElement(api.TowerView, { sessionId: 'session-test' }));
+  check('切回列表视图', hosts(listFrame).some((node) => typeof node.props.className === 'string'
+    && node.props.className.includes('tw-table-wrap')));
+} catch (error) {
+  check('视图切换不抛错', false, error.message);
+}
+
 // 配置面板自己也能渲染（插件页那条路）
 try {
   render(createElement(api.ConfigPanel, { embedded: true }));
@@ -275,7 +301,7 @@ try {
 // ── 预设档：文本框只读展示预设正文；自定义档才可编辑 ─────────────────────
 const modeField = (value) => ({
   key: 'summaryPromptMode',
-  label: '蒸馏提示词',
+  label: '总结提示词',
   type: 'select',
   targetKey: 'summaryPrompt',
   options: [
@@ -290,7 +316,7 @@ const modeField = (value) => ({
 });
 const promptField = (value) => ({
   key: 'summaryPrompt',
-  label: '自定义蒸馏提示词',
+  label: '自定义总结提示词',
   type: 'textarea',
   rows: 5,
   modeKey: 'summaryPromptMode',
