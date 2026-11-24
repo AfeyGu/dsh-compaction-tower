@@ -368,6 +368,42 @@ try {
   check('配置面板渲染不抛错', false, error.message);
 }
 
+// ── 思考等级下拉：候选按所选观察者模型动态取，空档 = 跟随会话 ─────────────
+// 假 React 不执行 effect，所以把服务端会返回的档位直接塞进 efforts 槽位再渲染。
+try {
+  const effortPayload = {
+    path: 'C:/tmp/tower-config.json',
+    revision: 1,
+    groups: [{
+      title: '观察者',
+      fields: [
+        { key: 'observerProvider', label: '观察者 provider', type: 'select', source: 'provider', value: 'magpie', default: '', base: '', override: false },
+        { key: 'observerModel', label: '观察者 model', type: 'select', source: 'model', pairKey: 'observerProvider', value: 'm', default: '', base: '', override: false },
+        { key: 'observerReasoningEffort', label: '思考等级', type: 'select', source: 'effort', pairKey: 'observerModel', value: '', default: '', base: '', override: false },
+      ],
+    }],
+    presets: {},
+    catalog: { providers: [], models: [] },
+    problem: null,
+  };
+  slotsOf(api.ConfigPanel)[0] = { value: effortPayload };
+  const setEfforts = slotsOf(api.ConfigPanel)[5]?.setter;
+  check('思考等级握着 setter', typeof setEfforts === 'function');
+  setEfforts([{ id: 'low', name: 'Low' }, { id: 'max', name: 'Max' }]);
+  const effortTree = render(createElement(api.ConfigPanel, { embedded: true }));
+  check('思考等级下拉带空档（Default）', texts(effortTree).some((text) => text === '默认（Default）'));
+  check('思考等级下拉列出模型声明的档位',
+    texts(effortTree).some((text) => text.includes('Low（low）')) && texts(effortTree).some((text) => text.includes('Max（max）')),
+    JSON.stringify(texts(effortTree)));
+
+  // 目录之外的手填值（旧配置、provider 暂时掉线）也要能看见，不能默默变成第一项。
+  setEfforts([]);
+  const staleTree = render(createElement(api.ConfigPanel, { embedded: true }));
+  check('档位不在目录时兜底可见', texts(staleTree).some((text) => text === '默认（Default）'));
+} catch (error) {
+  check('思考等级渲染不抛错', false, error.message);
+}
+
 if (failures.length === 0) {
   console.log(`✅ client: ${passed} 项全部通过（钩子数量一致性已守住）`);
 } else {

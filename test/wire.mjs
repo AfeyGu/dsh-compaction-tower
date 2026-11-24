@@ -90,6 +90,7 @@ await routesPlugin?.apply(ctx);
 check('注册了状态路由', routes.has('/tower/state'));
 check('注册了操作路由', routes.has('/tower/action'));
 check('注册了配置路由', routes.has('/tower/config'));
+check('注册了档位路由', routes.has('/tower/efforts'));
 
 const decompress = tools.get('decompress');
 check('decompress 有 output 契约', typeof decompress?.output?.render === 'function');

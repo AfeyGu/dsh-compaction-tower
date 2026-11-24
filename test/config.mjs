@@ -149,11 +149,11 @@ const ctx = {
 registerTowerRoutes(ctx, { tower: {}, store });
 check('注册了配置路由', routes.has('/tower/config'));
 
-function fakeRequest(method, body) {
+function fakeRequest(method, body, url = '/tower/config') {
   const listeners = new Map();
   const req = {
     method,
-    url: '/tower/config',
+    url,
     on(event, handler) { listeners.set(event, handler); return req; },
   };
   setImmediate(() => {
@@ -225,6 +225,47 @@ equal('某个 provider 掉线不影响别的', catalogBody.catalog.models.map((m
 store.save({ observerProvider: 'magpie', observerModel: 'group/deepseek-flash' });
 equal('观察者路由可以保存', `${store.config.observerProvider}/${store.config.observerModel}`, 'magpie/group/deepseek-flash');
 equal('单块原文上限默认给到 200K', DEFAULTS.observerMaxTokens, 200000);
+
+// ── 思考等级：默认留空；档位按所选模型动态取 ─────────────────────────────
+const effortField = allFields.find((field) => field.key === 'observerReasoningEffort');
+equal('思考等级默认留空', effortField?.value, '');
+check('思考等级档位按模型动态取', effortField?.source === 'effort' && effortField?.pairKey === 'observerModel');
+store.save({ observerReasoningEffort: 'low' });
+equal('思考等级可保存', store.config.observerReasoningEffort, 'low');
+store.reset(['observerReasoningEffort']);
+equal('思考等级 reset 回空', store.config.observerReasoningEffort, '');
+
+// ── 档位路由：GET /tower/efforts（思考等级下拉的数据源） ──────────────────
+const effortRoutes = new Map();
+registerTowerRoutes({
+  webServer: { register(route) { effortRoutes.set(route.path, route); return () => {}; } },
+  sessions: { list: () => [] },
+  agents: { get: () => undefined },
+  get: (name) => (name === 'llm'
+    ? { resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'max', name: 'Max' }] } }) }
+    : undefined),
+}, { tower: {}, store });
+check('注册了档位路由', effortRoutes.has('/tower/efforts'));
+
+const effortsRes = fakeResponse();
+await effortRoutes.get('/tower/efforts').handler(
+  fakeRequest('GET', undefined, '/tower/efforts?provider=magpie&model=opencode-go/glm-5.3'), effortsRes);
+equal('档位路由 200', effortsRes.status, 200);
+equal('档位来自所选模型的目录声明', JSON.parse(effortsRes.body).efforts, [{ id: 'low', name: 'Low' }, { id: 'max', name: 'Max' }]);
+
+const effortNoLlmRoutes = new Map();
+registerTowerRoutes({
+  webServer: { register(route) { effortNoLlmRoutes.set(route.path, route); return () => {}; } },
+  sessions: { list: () => [] },
+  agents: { get: () => undefined },
+  get: () => undefined,
+}, { tower: {}, store });
+const noLlmRes = fakeResponse();
+await effortNoLlmRoutes.get('/tower/efforts').handler(fakeRequest('GET', undefined, '/tower/efforts?provider=p&model=m'), noLlmRes);
+equal('目录拿不到时空档位（不挡配置页）', JSON.parse(noLlmRes.body).efforts, []);
+const missingRes = fakeResponse();
+await effortNoLlmRoutes.get('/tower/efforts').handler(fakeRequest('GET', undefined, '/tower/efforts'), missingRes);
+equal('缺 provider/model 返回 400', missingRes.status, 400);
 
 rmSync(home, { recursive: true, force: true });
 

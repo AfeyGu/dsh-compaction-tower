@@ -8,6 +8,7 @@
  * 跑法：node test/patch.mjs
  */
 import { Tower } from '../lib/tower.js';
+import { requestSummary } from '../lib/summarize.js';
 import { Session } from '@deepseek-ai/dsh-session';
 import { planTarget } from '../lib/select.js';
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic';
@@ -312,6 +313,73 @@ const followEngine = {
 };
 await tower.summarizeWithRoute(followEngine, { messages: [] }, swapAgent, signal);
 check('观察者留空：不碰引擎配置', followSeen[0] === '');
+
+// ── 9b. 思考等级：显式配置原样返回，留空 = 不传（模型默认） ───────────────
+// 特意不做「跟随会话」：会话与观察者可能是两台模型、档位词表不通用
+// （qwen3.8 的 xhigh ≠ glm-5.3 的 low/high/max），字面透传会被适配器本地拒绝；
+// 不传参数则任何模型都合法 —— 留空即 DSH 界面「Default」的同款语义。
+const effortTower = new Tower(ctx, { ...tower.config, observerReasoningEffort: 'low' });
+check('思考等级显式配置原样返回', effortTower.observerEffort() === 'low');
+const effortEmptyTower = new Tower(ctx, tower.config);
+check('思考等级留空返回空串', effortEmptyTower.observerEffort() === '');
+check('手写配置缺键也能工作', effortEmptyTower.observerEffort() === '');
+check('显式空串也按默认处理',
+  new Tower(ctx, { ...tower.config, observerReasoningEffort: '' }).observerEffort() === '');
+
+// ── 9c. requestSummary：保险丝按模型上限钳制，档位透传 ──────────────────
+// 空流（stream 立刻结束）在真链路上是失败，这里正好借它拿到已构造的请求体。
+const captured = [];
+let summaryError = null;
+try {
+  await requestSummary({
+    ctx: { llm: {
+      resolveModelInfo: async () => ({ context: { contextWindow: 100000 }, defaultMaxTokens: 8000 }),
+      stream: async function* (request) { captured.push(request); },
+    } },
+    session: { id: 'probe', toolHistory: () => [] },
+    provider: 'p', model: 'm',
+    input: { messages: [] },
+    instruction: '总结',
+    maxTokens: 200000,
+    effort: 'low',
+  });
+} catch (error) { summaryError = error; }
+check('空流按失败处理（摘要为空）', summaryError !== null);
+check('保险丝被钳到模型上限', captured[0]?.maxTokens === 8000, String(captured[0]?.maxTokens));
+check('思考等级透传到请求体', captured[0]?.reasoningEffort === 'low');
+
+try {
+  await requestSummary({
+    ctx: { llm: {
+      resolveModelInfo: async () => ({ context: { contextWindow: 100000 } }),
+      stream: async function* (request) { captured.push(request); },
+    } },
+    session: { id: 'probe2', toolHistory: () => [] },
+    provider: 'p', model: 'm',
+    input: { messages: [] },
+    instruction: '总结',
+    maxTokens: 200000,
+    effort: '',
+  });
+} catch { /* 空流照旧失败 */ }
+check('目录没声明上限就原样传', captured[1]?.maxTokens === 200000, String(captured[1]?.maxTokens));
+check('思考等级为空不传字段', !('reasoningEffort' in (captured[1] ?? {})));
+
+try {
+  await requestSummary({
+    ctx: { llm: {
+      resolveModelInfo: async () => ({ defaultMaxTokens: 8000 }),
+      stream: async function* (request) { captured.push(request); },
+    } },
+    session: { id: 'probe3', toolHistory: () => [] },
+    provider: 'p', model: 'm',
+    input: { messages: [] },
+    instruction: '总结',
+    maxTokens: 0,
+    effort: 'low',
+  });
+} catch { /* 空流照旧失败 */ }
+check('maxTokens=0 语义保留（不传上限）', !('maxTokens' in (captured[2] ?? {})));
 
 // ── /compact 接管：命令走塔的提交，不再让宿主现场摘要 ────────────────────
 const manualCalls = [];
