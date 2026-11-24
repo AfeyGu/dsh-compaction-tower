@@ -421,28 +421,47 @@ check('requireBelowThreshold=false 时同场景不抛错', await (async () => {
   try { return (await softTower.compactPressure(softEngine, switchAgent, switchHeader(), signal, false)) !== null; } catch { return false; }
 })());
 
-// 10c. 提交后达标：返回提交结果，切换放行。
-const doneTower = new Tower({ ...ctx, tokenMeter: {
-  measure: () => ({ nodes, surfaceTokens: 10000, totalTokens: doneTowerCommitted ? 6000 : 10000 }),
-  estimateMessage: () => 10,
-} }, tower.config);
-let doneTowerCommitted = false;
-doneTower.blocksOf = () => [block];
+// 10c. 逐块按新请求头重测，等于阈值仍需提交，低于阈值立即停。
+const doneHeader = switchHeader();
+const doneCalls = [];
+const measuredHeaders = [];
+const resolvedModels = [];
+const doneTower = new Tower({ ...ctx,
+  llm: { resolveModelInfo: async (provider, model, abort) => {
+    resolvedModels.push([provider, model, abort]);
+    return model === 'nm' ? { context: { contextWindow: 10000 } } : {};
+  } },
+  tokenMeter: {
+    measure: (_session, header) => {
+      measuredHeaders.push(header);
+      return { nodes, surfaceTokens: 10000, totalTokens: 10000 - 2000 * doneCalls.length };
+    },
+    estimateMessage: () => 10,
+  },
+}, { ...tower.config, retainRecentGroups: 0 });
+doneTower.blocksOf = () => [1, 2, 3].map((seq) => ({ ...block, blockId: `b0000${seq}`, covers: [seq] }));
 const doneEngine = {
   config: { thresholdRatio: 0.8 },
-  compactRegion: async (start, end) => { doneTowerCommitted = true; return { startSeq: start, endSeq: end }; },
+  async compactRegion(start, end) { doneCalls.push(start); return { startSeq: start, endSeq: end }; },
 };
-const doneResult = await doneTower.compactPressure(doneEngine, switchAgent, switchHeader(), signal, true);
-check('提交后低于阈值返回结果', doneResult !== null && doneResult.startSeq === 1,
-  doneResult === null ? 'null' : JSON.stringify(doneResult));
+const doneResult = await doneTower.compactPressure(doneEngine, switchAgent, doneHeader, signal, true);
+check('等于切换阈值继续压，低于阈值立即停', doneCalls.join(',') === '1,2' && doneResult?.startSeq === 1);
+check('切换只查询新模型窗口且传递取消信号', resolvedModels.length === 1
+  && resolvedModels[0][1] === 'nm' && resolvedModels[0][2] === signal);
+check('切换规划和重测全用新请求头', measuredHeaders.length >= 4 && measuredHeaders.every((header) => header === doneHeader));
 
-// 10d. 量不到新模型窗口：放行（overflow 恢复兜底），不动表层。
-const blindTower = new Tower({ ...ctx, llm: { resolveModelInfo: async () => { throw new Error('no catalog'); } } }, tower.config);
-blindTower.blocksOf = () => [block];
-const blindCalls = [];
-const blindEngine = { config: {}, compactRegion: async (s, e) => { blindCalls.push([s, e]); return { startSeq: s, endSeq: e }; } };
-const blindResult = await blindTower.compactPressure(blindEngine, switchAgent, switchHeader(), signal, true);
-check('量不到窗口时放行不压缩', blindResult === null && blindCalls.length === 0);
+// 10d. 无法取得窗口时和宿主一样拒绝，保持表层完整。
+const blindEngine = { config: {}, compactRegion: () => { throw new Error('unexpected compaction'); } };
+for (const [resolveModelInfo, reason] of [
+  [async () => { throw new Error('no catalog'); }, 'no catalog'],
+  [async () => ({}), 'contextWindow'],
+]) {
+  const blindTower = new Tower({ ...ctx, llm: { resolveModelInfo } }, tower.config);
+  let failure;
+  try { await blindTower.compactPressure(blindEngine, switchAgent, switchHeader(), signal, true); }
+  catch (error) { failure = error; }
+  check(`没有有效窗口时拒绝切换 (${reason})`, failure?.message.includes(reason));
+}
 
 // 10e. 阈值公式：照宿主 resolveCompactSpec —— 窗口扣输出预留与 headroom，再与比例取小。
 const formulaTower = new Tower({ ...ctx, llm: {
@@ -451,15 +470,24 @@ const formulaTower = new Tower({ ...ctx, llm: {
 const formulaHeader = { config: { provider: 'a', model: 'b' } };
 // 100000 − 8000 预留 = 92000；92000 − 4000 headroom = 88000；min(100000×0.5, 88000) = 50000
 check('阈值按宿主公式算',
-  (await formulaTower.switchThresholdOf({ config: { thresholdRatio: 0.5, headroomTokens: 4000 } }, formulaHeader)) === 50000);
+  (await formulaTower.switchBudgetOf({ config: { thresholdRatio: 0.5, headroomTokens: 4000 } }, formulaHeader)).threshold === 50000);
 // modelPolicies 的 exact 覆盖参与计算：min(100000×0.9, 88000) = 88000
 check('modelPolicies 按模型覆盖参与',
-  (await formulaTower.switchThresholdOf({
+  (await formulaTower.switchBudgetOf({
     config: { thresholdRatio: 0.2, headroomTokens: 4000, modelPolicies: [{ provider: 'a', model: 'b', thresholdRatio: 0.9 }] },
-  }, formulaHeader)) === 88000);
-// headroom 吃光预算 → 量不出阈值 → 放行（null）
-check('headroom 吃光预算返回 null',
-  (await formulaTower.switchThresholdOf({ config: { thresholdRatio: 0.5, headroomTokens: 100000 } }, formulaHeader)) === null);
+  }, formulaHeader)).threshold === 88000);
+check('显式输出预留覆盖适配器默认值',
+  (await formulaTower.switchBudgetOf({ config: { headroomTokens: 4000 } },
+    { config: { ...formulaHeader.config, maxTokens: 10000 } })).threshold === 86000);
+for (const [config, reason] of [
+  [{ thresholdRatio: 0.5, headroomTokens: 100000 }, '没有压缩预算'],
+  [{ thresholdRatio: 0.5, retainTokens: 50000 }, '保留额度'],
+]) {
+  let failure;
+  try { await formulaTower.compactPressure({ config }, switchAgent, formulaHeader, signal, true); }
+  catch (error) { failure = error; }
+  check(`切换拒绝非法预算 (${reason})`, failure?.message.includes(reason));
+}
 
 // ── /compact 接管：命令走塔的提交，不再让宿主现场摘要 ────────────────────
 const manualCalls = [];

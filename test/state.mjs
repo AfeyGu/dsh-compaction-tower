@@ -95,6 +95,19 @@ check('当前组装：按层计数 + 原文条数',
   JSON.stringify(state.composition));
 check('system 不算原文', state.composition.raw === 2, String(state.composition.raw));
 
+// b00006 只蒸馏完成，尚未提交。它引用的两个子块分别仍在表层、已被替换。
+const blocks = tower.blocksOf();
+tower.blocksOf = () => [...blocks, {
+  ...blocks[1], blockId: 'b00006', tier: 3, covers: [3, 5], childBlockIds: ['b00002', 'b00005'],
+}];
+const withDraftParent = await buildState(tower, session);
+check('未提交的上层块不掩盖仍在表层的子块', withDraftParent.blocks[1].status === 'committed');
+check('未提交的上层块不掩盖被覆盖的子块', withDraftParent.blocks[4].status === 'stale');
+events.set(5, { seq: 5, type: 'plugin:tower/commit', ignorable: true, data: { blockId: 'b00006', checkpointSeq: 6 } });
+const withSubmittedParent = await buildState(tower, session);
+check('已提交上层块可以解释离开表层的子块', withSubmittedParent.blocks[4].status === 'consumed');
+check('子块仍在表层时优先报告实际表层状态', withSubmittedParent.blocks[1].status === 'committed');
+
 if (failures.length === 0) {
   console.log(`✅ state: ${passed} 项全部通过`);
 } else {
