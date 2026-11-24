@@ -109,12 +109,18 @@ const fakeTower = (tag) => ({
   rememberEngine() {},
   compactIfNeeded() { rebindCalls.push(tag); return null; },
   serveSummary() { rebindCalls.push(`${tag}-sum`); return null; },
+  compactPressure() { rebindCalls.push(`${tag}-press`); return null; },
 });
 installEnginePatches(fakeTower('A'));
 BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'pressure', undefined);
 installEnginePatches(fakeTower('B'));
 BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'pressure', undefined);
 check('重装后补丁改指向新实例', JSON.stringify(rebindCalls) === JSON.stringify(['A', 'B']), rebindCalls.join(','));
+// 模型切换的补丁也必须跟着换实例（旧宿主没有这个方法时跳过本条）。
+if (typeof BasicCompactionEngine.prototype.compactPressure === 'function') {
+  BasicCompactionEngine.prototype.compactPressure.call({}, { session: {} }, { config: {} }, undefined, false);
+  check('切换强压补丁也指向新实例', rebindCalls.at(-1) === 'B-press', rebindCalls.join(','));
+}
 
 // ── 插件模块被重新加载后，补丁仍指向新实例 ──────────────────────────────
 // cordis 重装插件时会新建模块实例。若补丁把实例存在模块级变量里，
@@ -128,9 +134,14 @@ freshEngine.installEnginePatches({
   compactIfNeeded() { freshCalls.push('fresh'); return null; },
   serveSummary() { freshCalls.push('fresh-sum'); return null; },
   manualCompact() { freshCalls.push('fresh-manual'); return null; },
+  compactPressure() { freshCalls.push('fresh-press'); return null; },
 });
 BasicCompactionEngine.prototype.compactIfNeeded.call({}, { session: {} }, 'pressure', undefined);
-check('新模块实例能接管旧闭包', freshCalls.length === 1 && freshCalls[0] === 'fresh', freshCalls.join(','));
+check('新模块实例能接管旧闭包', freshCalls.length >= 1 && freshCalls[0] === 'fresh', freshCalls.join(','));
+if (typeof BasicCompactionEngine.prototype.compactPressure === 'function') {
+  BasicCompactionEngine.prototype.compactPressure.call({}, { session: {} }, { config: {} }, undefined, false);
+  check('新模块实例接管切换强压', freshCalls.includes('fresh-press'), freshCalls.join(','));
+}
 
 // ── package.json 不能带 BOM ─────────────────────────────────────────────
 // 宿主装包时要 JSON.parse 它，BOM 会让整条安装被拒（Unexpected token '\uFEFF'）。

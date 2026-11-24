@@ -26,6 +26,10 @@ const events = new Map([
     data: { source: { kind: 'compact-checkpoint', compactionId: 'c1' }, content: [{ type: 'text', text: checkpointText('b00002', 2) }] },
   }],
   [9, { seq: 9, type: 'plugin:tower/block', data: {} }],
+  // b00005 曾提交到 seq 5 的 checkpoint，但 5 已不在表层（被塔外压缩换掉）。
+  // seq 必须连续：iterateEvents 读到 undefined 就停，9 与它都是摆设，
+  // commit 记录要放在 4 才会被读到。
+  [4, { seq: 4, type: 'plugin:tower/commit', ignorable: true, data: { blockId: 'b00005', checkpointSeq: 5 } }],
 ]);
 
 const session = {
@@ -59,7 +63,9 @@ const tower = new Tower(ctx, config);
 tower.blocksOf = () => [
   { blockId: 'b00001', tier: 1, covers: [1, 2], coveredTokens: 2048, summaryTokens: 120, childBlockIds: [], kind: 'run', summary: [{ type: 'text', text: 'T1 摘要' }], createdAt: '2026-11-05T00:00:00.000Z' },
   { blockId: 'b00002', tier: 2, covers: [3], coveredTokens: 300, summaryTokens: 90, childBlockIds: ['b00001'], kind: 'distill', summary: [{ type: 'text', text: 'T2 摘要' }], createdAt: '2026-11-05T00:01:00.000Z' },
-  { blockId: 'b00003', tier: 1, covers: [7], coveredTokens: 900, summaryTokens: 100, childBlockIds: [], kind: 'run', summary: [{ type: 'text', text: '还没提交' }], createdAt: '2026-11-05T00:02:00.000Z' },
+  { blockId: 'b00003', tier: 1, covers: [1], coveredTokens: 900, summaryTokens: 100, childBlockIds: [], kind: 'run', summary: [{ type: 'text', text: '还没提交' }], createdAt: '2026-11-05T00:02:00.000Z' },
+  { blockId: 'b00004', tier: 1, covers: [7], coveredTokens: 900, summaryTokens: 100, childBlockIds: [], kind: 'run', summary: [{ type: 'text', text: '材料已丢' }], createdAt: '2026-11-05T00:03:00.000Z' },
+  { blockId: 'b00005', tier: 1, covers: [2], coveredTokens: 700, summaryTokens: 80, childBlockIds: [], kind: 'run', summary: [{ type: 'text', text: '曾提交后被覆盖' }], createdAt: '2026-11-05T00:04:00.000Z' },
 ];
 
 const state = await buildState(tower, session);
@@ -71,10 +77,12 @@ check('固定开销单独报出来', state.budget.fixed.system === 5000 && state
   && state.budget.fixed.total === 5000, JSON.stringify(state.budget.fixed));
 check('内容与可用预算分开给', state.budget.content === 7000 && state.budget.usable === 95000,
   `${state.budget.content}/${state.budget.usable}`);
-check('块数量与账本一致', state.blocks.length === 3);
+check('块数量与账本一致', state.blocks.length === 5);
 check('被上层覆盖的块是 consumed', state.blocks[0].status === 'consumed');
 check('摘要仍在表层的是 committed', state.blocks[1].status === 'committed');
 check('没进过上下文的是 dormant', state.blocks[2].status === 'dormant');
+check('covers 被换掉的待提交块标搁浅', state.blocks[3].status === 'stranded');
+check('checkpoint 被覆盖的已提交块标已失效', state.blocks[4].status === 'stale');
 check('块头带上块号与层级', state.blocks[1].blockId === 'b00002' && state.blocks[1].tier === 2);
 check('覆盖引用可读', state.blocks[0].coverRefs.join(',') === 'm00001,m00002');
 check('token 有可读标签', state.blocks[0].coveredLabel === '2.0K');

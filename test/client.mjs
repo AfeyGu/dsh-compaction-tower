@@ -148,6 +148,22 @@ const fakeState = {
     summaryLabel: '2.2K',
     status: 'committed',
     summary: '摘要正文',
+  }, {
+    blockId: 'b00008',
+    tier: 1,
+    covers: [8],
+    coveredLabel: '1.0K',
+    summaryLabel: '0.1K',
+    status: 'stale',
+    summary: '曾提交后被覆盖',
+  }, {
+    blockId: 'b00009',
+    tier: 1,
+    covers: [9],
+    coveredLabel: '1.0K',
+    summaryLabel: '0.1K',
+    status: 'stranded',
+    summary: '材料已丢',
   }],
   composition: { tiers: [{ tier: 2, count: 1 }, { tier: 1, count: 3 }], raw: 42 },
   inflight: [{ blockId: 'b00009', tier: 1, count: 46, coveredLabel: '55.9K', startedAt: 1 }],
@@ -175,6 +191,13 @@ try {
   check('数据帧渲染出压缩记录', texts(loaded).some((text) => text.includes('压缩记录')), JSON.stringify(texts(loaded)));
   check('数据帧渲染出块号', texts(loaded).some((text) => text.includes('b00001')));
   check('数据帧渲染出设置按钮', texts(loaded).some((text) => text === '设置'));
+  check('失效块显示已失效与材料已失',
+    texts(loaded).some((text) => text === '已失效') && texts(loaded).some((text) => text === '材料已失'),
+    JSON.stringify(texts(loaded).filter((text) => text.includes('已') || text.includes('材料'))));
+  check('计数行分开报失效数', texts(loaded).some((text) => text.includes('已失效 2')),
+    JSON.stringify(texts(loaded).filter((text) => text.includes('已失效'))));
+  check('失效块行淡化显示', hosts(loaded).some((node) => typeof node.props.className === 'string'
+    && (node.props.className.includes('tw-row-stale') || node.props.className.includes('tw-row-stranded'))));
   // 占用条是三段一条：实心（已用）/ 斜纹（当前→触发）/ 灰（触发之后）
   const withClass = (suffix) => hosts(loaded).filter((node) => typeof node.props.className === 'string'
     && node.props.className.includes(suffix));

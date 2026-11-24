@@ -381,6 +381,86 @@ try {
 } catch { /* 空流照旧失败 */ }
 check('maxTokens=0 语义保留（不传上限）', !('maxTokens' in (captured[2] ?? {})));
 
+// ── 10. compactPressure（模型切换强压）：塔式提交替代宿主区间摘要 ───────
+// issue #1 的根治点：换到小窗口模型时宿主要求先压到新模型阈值以下。
+// 塔接住后每段替换都走自己的提交循环（带块号、写 commit 记录）；
+// 压不动则抛错，由宿主 agent/request 钩子包装成「Cannot switch」拒绝切换。
+const switchAgent = { session, options: { provider: 'p', model: 'm' }, ctx: { get: () => undefined } };
+const switchHeader = () => ({ config: { provider: 'np', model: 'nm' } });
+
+// 10a. 预算充足：新模型阈值高于当前总量 → 直接放行，不动表层。
+const ampleTower = new Tower({ ...ctx, llm: { resolveModelInfo: async () => ({ context: { contextWindow: 500000 } }) } }, tower.config);
+ampleTower.blocksOf = () => [block];
+const ampleCalls = [];
+const ampleEngine = { config: { thresholdRatio: 0.8 }, compactRegion: async (s, e) => { ampleCalls.push([s, e]); return { startSeq: s, endSeq: e }; } };
+const ampleResult = await ampleTower.compactPressure(ampleEngine, switchAgent, switchHeader(), signal, true);
+check('切换预算充足直接放行', ampleResult === null && ampleCalls.length === 0,
+  `result=${ampleResult === null ? 'null' : 'obj'} calls=${ampleCalls.length}`);
+
+// 10b. 越线且有块：塔式提交（compactRegion 走塔的循环），仍压不到阈值就抛错。
+// mock 窗口 10000、ratio 0.8 → 阈值 8000；当前 total 10000 → 越线。
+const pressTower = new Tower(ctx, tower.config);
+pressTower.blocksOf = () => [block];
+const pressCalls = [];
+const pressEngine = {
+  config: { thresholdRatio: 0.8 },
+  compactRegion: async (start, end) => { pressCalls.push([start, end]); return { startSeq: start, endSeq: end }; },
+};
+let pressError = null;
+try {
+  await pressTower.compactPressure(pressEngine, switchAgent, switchHeader(), signal, true);
+} catch (error) { pressError = error; }
+check('切换强压走塔式提交', pressCalls.length === 1 && pressTower.stats.committed === 1,
+  `calls=${pressCalls.length} committed=${pressTower.stats.committed}`);
+check('提交后仍超阈值时抛错拒绝切换', pressError !== null && String(pressError?.message).includes('阈值'),
+  pressError === null ? 'no error' : String(pressError.message));
+check('requireBelowThreshold=false 时同场景不抛错', await (async () => {
+  const softTower = new Tower(ctx, tower.config);
+  softTower.blocksOf = () => [block];
+  const softEngine = { config: { thresholdRatio: 0.8 }, compactRegion: async (s, e) => ({ startSeq: s, endSeq: e }) };
+  try { return (await softTower.compactPressure(softEngine, switchAgent, switchHeader(), signal, false)) !== null; } catch { return false; }
+})());
+
+// 10c. 提交后达标：返回提交结果，切换放行。
+const doneTower = new Tower({ ...ctx, tokenMeter: {
+  measure: () => ({ nodes, surfaceTokens: 10000, totalTokens: doneTowerCommitted ? 6000 : 10000 }),
+  estimateMessage: () => 10,
+} }, tower.config);
+let doneTowerCommitted = false;
+doneTower.blocksOf = () => [block];
+const doneEngine = {
+  config: { thresholdRatio: 0.8 },
+  compactRegion: async (start, end) => { doneTowerCommitted = true; return { startSeq: start, endSeq: end }; },
+};
+const doneResult = await doneTower.compactPressure(doneEngine, switchAgent, switchHeader(), signal, true);
+check('提交后低于阈值返回结果', doneResult !== null && doneResult.startSeq === 1,
+  doneResult === null ? 'null' : JSON.stringify(doneResult));
+
+// 10d. 量不到新模型窗口：放行（overflow 恢复兜底），不动表层。
+const blindTower = new Tower({ ...ctx, llm: { resolveModelInfo: async () => { throw new Error('no catalog'); } } }, tower.config);
+blindTower.blocksOf = () => [block];
+const blindCalls = [];
+const blindEngine = { config: {}, compactRegion: async (s, e) => { blindCalls.push([s, e]); return { startSeq: s, endSeq: e }; } };
+const blindResult = await blindTower.compactPressure(blindEngine, switchAgent, switchHeader(), signal, true);
+check('量不到窗口时放行不压缩', blindResult === null && blindCalls.length === 0);
+
+// 10e. 阈值公式：照宿主 resolveCompactSpec —— 窗口扣输出预留与 headroom，再与比例取小。
+const formulaTower = new Tower({ ...ctx, llm: {
+  resolveModelInfo: async () => ({ context: { contextWindow: 100000 }, defaultMaxTokens: 8000 }),
+} }, tower.config);
+const formulaHeader = { config: { provider: 'a', model: 'b' } };
+// 100000 − 8000 预留 = 92000；92000 − 4000 headroom = 88000；min(100000×0.5, 88000) = 50000
+check('阈值按宿主公式算',
+  (await formulaTower.switchThresholdOf({ config: { thresholdRatio: 0.5, headroomTokens: 4000 } }, formulaHeader)) === 50000);
+// modelPolicies 的 exact 覆盖参与计算：min(100000×0.9, 88000) = 88000
+check('modelPolicies 按模型覆盖参与',
+  (await formulaTower.switchThresholdOf({
+    config: { thresholdRatio: 0.2, headroomTokens: 4000, modelPolicies: [{ provider: 'a', model: 'b', thresholdRatio: 0.9 }] },
+  }, formulaHeader)) === 88000);
+// headroom 吃光预算 → 量不出阈值 → 放行（null）
+check('headroom 吃光预算返回 null',
+  (await formulaTower.switchThresholdOf({ config: { thresholdRatio: 0.5, headroomTokens: 100000 } }, formulaHeader)) === null);
+
 // ── /compact 接管：命令走塔的提交，不再让宿主现场摘要 ────────────────────
 const manualCalls = [];
 const commandTower = new Tower({ ...ctx }, tower.config);
